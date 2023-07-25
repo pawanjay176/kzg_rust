@@ -759,7 +759,7 @@ fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
 
 /// Note: using commitment_bytes instead of g1_t like the c code since
 /// we seem to be doing unnecessary conversions
-fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> fr_t {
+fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, KzgError> {
     let mut bytes = [0u8; CHALLENGE_INPUT_SIZE as usize];
     let mut offset = 0;
 
@@ -781,6 +781,10 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> fr_t {
     offset += BYTES_PER_BLOB as usize;
 
     /* Copy commitment */
+    // Check if commitment bytes are a valid g1 point
+    if bytes_to_kzg_commitment(commitment_bytes).is_err() {
+        return Err(KzgError::BadArgs("Invalid commitment bytes".to_string()));
+    }
     bytes[offset..offset + BYTES_PER_COMMITMENT as usize]
         .copy_from_slice(commitment_bytes.bytes.as_slice());
     offset += BYTES_PER_COMMITMENT as usize;
@@ -796,7 +800,7 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> fr_t {
             CHALLENGE_INPUT_SIZE as usize,
         );
     }
-    hash_to_bls_field(&eval_challenge)
+    Ok(hash_to_bls_field(&eval_challenge))
 }
 
 fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
@@ -939,10 +943,22 @@ pub fn compute_kzg_proof(
     let poly = blob_to_polynomial(blob)?;
     let fr_z = bytes_to_bls_field(z_bytes)?;
 
-
     let (proof, fr_y) = compute_kzg_proof_impl(&poly, &fr_z, s)?;
     let y_bytes = bytes_from_bls_field(&fr_y);
     Ok((proof, y_bytes))
+}
+
+pub fn compute_blob_kzg_proof(
+    blob: &Blob,
+    commitment_bytes: &KzgCommitment,
+    s: &KzgSettings,
+) -> Result<KzgProof, KzgError> {
+    let poly = blob_to_polynomial(blob)?;
+    /* Compute the challenge for the given blob/commitment */
+    let evaluation_challenge_fr = compute_challenge(blob, &commitment_bytes.0)?;
+
+    /* Call helper function to compute proof and y */
+    compute_kzg_proof_impl(&poly, &evaluation_challenge_fr, s).map(|(proof, _)| proof)
 }
 
 fn compute_kzg_proof_impl(
@@ -1059,7 +1075,7 @@ pub fn verify_blob_kzg_proof(
     let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
     let proof = bytes_to_kzg_proof(&proof_bytes.0)?;
     /* Compute challenge for the blob/commitment */
-    let eveluation_challenge_fr = compute_challenge(blob, &commitment_bytes.0);
+    let eveluation_challenge_fr = compute_challenge(blob, &commitment_bytes.0)?;
 
     /* Evaluate challenge to get y */
     let y_fr = evaluate_polynomial_in_evaluation_form(&poly, &eveluation_challenge_fr, s)?;
@@ -1370,30 +1386,39 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_compute_blob_kzg_proof() {
-    //     let kzg_settings = load_trusted_setup_from_file();
-    //     let test_files: Vec<PathBuf> = glob::glob(COMPUTE_BLOB_KZG_PROOF_TESTS)
-    //         .unwrap()
-    //         .map(Result::unwrap)
-    //         .collect();
-    //     assert!(!test_files.is_empty());
+    #[test]
+    fn test_compute_blob_kzg_proof() {
+        let kzg_settings = load_trusted_setup_from_file();
+        let test_files: Vec<PathBuf> = glob::glob(COMPUTE_BLOB_KZG_PROOF_TESTS)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(!test_files.is_empty());
 
-    //     for test_file in test_files {
-    //         let yaml_data = fs::read_to_string(test_file).unwrap();
-    //         let test: compute_blob_kzg_proof::Test = serde_yaml::from_str(&yaml_data).unwrap();
-    //         let (Ok(blob), Ok(commitment)) = (test.input.get_blob(), test.input.get_commitment())
-    //         else {
-    //             assert!(test.get_output().is_none());
-    //             continue;
-    //         };
+        for (i, test_file) in test_files.iter().enumerate() {
+            let yaml_data = fs::read_to_string(test_file).unwrap();
+            let test: compute_blob_kzg_proof::Test = serde_yaml::from_str(&yaml_data).unwrap();
+            let (Ok(blob), Ok(commitment)) = (test.input.get_blob(), test.input.get_commitment())
+            else {
+                assert!(test.get_output().is_none());
+                continue;
+            };
 
-    //         match KZGProof::compute_blob_kzg_proof(blob, commitment, &kzg_settings) {
-    //             Ok(res) => assert_eq!(res.bytes, test.get_output().unwrap().bytes),
-    //             _ => assert!(test.get_output().is_none()),
-    //         }
-    //     }
-    // }
+            match compute_blob_kzg_proof(&blob, &KzgCommitment(commitment), &kzg_settings) {
+                Ok(res) => {
+                    dbg!(test_file);
+
+                    assert_eq!(res.0.bytes, test.get_output().unwrap().bytes);
+                }
+                e => {
+                    if test.get_output().is_some() {
+                        dbg!(e);
+                    }
+                    assert!(test.get_output().is_none());
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_verify_kzg_proof() {
