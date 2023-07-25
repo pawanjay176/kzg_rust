@@ -502,9 +502,6 @@ fn fr_is_zero(p: &fr_t) -> bool {
     *p == FR_ZERO
 }
 
-fn fr_is_equal(a: fr_t, b: fr_t) -> bool {
-    a == b
-}
 
 fn fr_div(a: fr_t, b: fr_t) -> fr_t {
     let mut tmp = blst_fr::default();
@@ -807,7 +804,7 @@ fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
     assert_eq!(p.len(), coeffs.len());
     let len = p.len();
 
-    let mut tmp = g1_t::default();
+    let mut tmp;
     let mut res = G1_IDENTITY;
     for i in 0..len {
         tmp = g1_mul(&p[i], &coeffs[i]);
@@ -821,7 +818,7 @@ fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, KzgError> {
     if len < 8 {
         return Ok(g1_lincomb_naive(p, coeffs));
     }
-    let mut scratch_size = 0;
+    let scratch_size: usize;
     let mut res = g1_t::default();
     unsafe {
         scratch_size = blst_p1s_mult_pippenger_scratch_sizeof(len);
@@ -1276,6 +1273,10 @@ pub fn load_trusted_setup(
             kzg_settings.g2_values.push(tmp);
         }
     }
+
+    /* Make sure the trusted setup was loaded in Lagrange form */
+    is_trusted_setup_in_lagrange_form(&kzg_settings)?;
+
     /* Compute roots of unity and permute the G1 trusted setup */
     let roots_of_unity = compute_roots_of_unity(max_scale)?;
     kzg_settings.roots_of_unity = roots_of_unity;
