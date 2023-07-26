@@ -150,7 +150,7 @@ where
     // Hence, we truncate the number of G1 points after deserialisation
     // to ensure that we have the right number of g1 points in the
     // trusted setup.
-    decoded.truncate(FIELD_ELEMENTS_PER_BLOB as usize);
+    decoded.truncate(FIELD_ELEMENTS_PER_BLOB);
     Ok(decoded)
 }
 

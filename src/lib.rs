@@ -33,24 +33,24 @@ pub struct KzgSettings {
     g2_values: Vec<g2_t>,
 }
 
-pub const BYTES_PER_FIELD_ELEMENT: u64 = 32;
-pub const BYTES_PER_COMMITMENT: u64 = 48;
-pub const BYTES_PER_PROOF: u64 = 48;
-pub const FIELD_ELEMENTS_PER_BLOB: u64 = 4096;
+pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
+pub const BYTES_PER_COMMITMENT: usize = 48;
+pub const BYTES_PER_PROOF: usize = 48;
+pub const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
 
-pub const CHALLENGE_INPUT_SIZE: u64 =
+pub const CHALLENGE_INPUT_SIZE: usize =
     DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT;
 
-pub const BYTES_PER_BLOB: u64 = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
+pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
 
 /// Domain seperator for the Fiat-Shamir protocol.
-const FIAT_SHAMIR_PROTOCOL_DOMAIN: &'static str = "FSBLOBVERIFY_V1_";
+const FIAT_SHAMIR_PROTOCOL_DOMAIN: &str = "FSBLOBVERIFY_V1_";
 
 /// Domain sepearator for a random challenge.
-const RANDOM_CHALLENGE_KZG_BATCH_DOMAIN: &'static str = "RCKZGBATCH___V1_";
+const RANDOM_CHALLENGE_KZG_BATCH_DOMAIN: &str = "RCKZGBATCH___V1_";
 
 /// Length of above domain strings.
-pub const DOMAIN_STR_LENGTH: u64 = 16;
+pub const DOMAIN_STR_LENGTH: usize = 16;
 
 /// The number of bytes in a g1 point.
 pub const BYTES_PER_G1: usize = 48;
@@ -59,7 +59,7 @@ pub const BYTES_PER_G1: usize = 48;
 pub const BYTES_PER_G2: usize = 96;
 
 /// The number of g1 points in a trusted setup.
-pub const TRUSTED_SETUP_NUM_G1_POINTS: usize = FIELD_ELEMENTS_PER_BLOB as usize;
+pub const TRUSTED_SETUP_NUM_G1_POINTS: usize = FIELD_ELEMENTS_PER_BLOB;
 
 /// The number of g2 points in a trusted setup.
 pub const TRUSTED_SETUP_NUM_G2_POINTS: usize = 65;
@@ -398,13 +398,13 @@ pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, KzgError> {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Polynomial {
-    evals: [fr_t; FIELD_ELEMENTS_PER_BLOB as usize],
+    evals: [fr_t; FIELD_ELEMENTS_PER_BLOB],
 }
 
 impl Default for Polynomial {
     fn default() -> Self {
         Self {
-            evals: [fr_t::default(); FIELD_ELEMENTS_PER_BLOB as usize],
+            evals: [fr_t::default(); FIELD_ELEMENTS_PER_BLOB],
         }
     }
 }
@@ -423,7 +423,7 @@ impl Bytes32 {
             )));
         }
         let mut arr = [0; 32];
-        arr.copy_from_slice(&b);
+        arr.copy_from_slice(b);
         Ok(Bytes32 { bytes: arr })
     }
 
@@ -464,19 +464,19 @@ impl Default for Bytes48 {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Blob {
-    bytes: [u8; BYTES_PER_BLOB as usize],
+    bytes: [u8; BYTES_PER_BLOB],
 }
 
 impl Blob {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KzgError> {
-        if bytes.len() != BYTES_PER_BLOB as usize {
+        if bytes.len() != BYTES_PER_BLOB {
             return Err(KzgError::InvalidBytesLength(format!(
                 "Invalid byte length. Expected {} got {}",
                 BYTES_PER_BLOB,
                 bytes.len(),
             )));
         }
-        let mut new_bytes = [0; BYTES_PER_BLOB as usize];
+        let mut new_bytes = [0; BYTES_PER_BLOB];
         new_bytes.copy_from_slice(bytes);
         Ok(Self { bytes: new_bytes })
     }
@@ -754,11 +754,11 @@ pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, KzgError> {
 
 fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
     let mut poly = Polynomial {
-        evals: [Default::default(); FIELD_ELEMENTS_PER_BLOB as usize],
+        evals: [Default::default(); FIELD_ELEMENTS_PER_BLOB],
     };
-    for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
-        let start_bytes = i * BYTES_PER_FIELD_ELEMENT as usize;
-        let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT as usize;
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
+        let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
+        let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT;
         let field_bytes = Bytes32::from_bytes(&blob.bytes[start_bytes..end_bytes])?;
         poly.evals[i] = bytes_to_bls_field(&field_bytes)?;
     }
@@ -768,13 +768,13 @@ fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
 /// Note: using commitment_bytes instead of g1_t like the c code since
 /// we seem to be doing unnecessary conversions
 fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, KzgError> {
-    let mut bytes = [0u8; CHALLENGE_INPUT_SIZE as usize];
+    let mut bytes = [0u8; CHALLENGE_INPUT_SIZE];
     let mut offset = 0;
 
     /* Copy domain separator */
-    bytes[offset..offset + DOMAIN_STR_LENGTH as usize]
+    bytes[offset..offset + DOMAIN_STR_LENGTH]
         .copy_from_slice(FIAT_SHAMIR_PROTOCOL_DOMAIN.as_bytes());
-    offset += DOMAIN_STR_LENGTH as usize;
+    offset += DOMAIN_STR_LENGTH;
 
     /* Copy polynomial degree (16-bytes, big-endian) */
     bytes[offset..offset + std::mem::size_of::<u64>()]
@@ -785,27 +785,27 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, Kz
     offset += std::mem::size_of::<u64>();
 
     /* Copy blob */
-    bytes[offset..offset + BYTES_PER_BLOB as usize].copy_from_slice(blob.bytes.as_slice());
-    offset += BYTES_PER_BLOB as usize;
+    bytes[offset..offset + BYTES_PER_BLOB].copy_from_slice(blob.bytes.as_slice());
+    offset += BYTES_PER_BLOB;
 
     /* Copy commitment */
     // Check if commitment bytes are a valid g1 point
     if bytes_to_kzg_commitment(commitment_bytes).is_err() {
         return Err(KzgError::BadArgs("Invalid commitment bytes".to_string()));
     }
-    bytes[offset..offset + BYTES_PER_COMMITMENT as usize]
+    bytes[offset..offset + BYTES_PER_COMMITMENT]
         .copy_from_slice(commitment_bytes.bytes.as_slice());
-    offset += BYTES_PER_COMMITMENT as usize;
+    offset += BYTES_PER_COMMITMENT;
 
     /* Make sure we wrote the entire buffer */
-    assert_eq!(offset, CHALLENGE_INPUT_SIZE as usize);
+    assert_eq!(offset, { CHALLENGE_INPUT_SIZE });
 
     let mut eval_challenge = Bytes32::default();
     unsafe {
         blst_sha256(
             eval_challenge.bytes.as_mut_ptr(),
             bytes.as_ptr(),
-            CHALLENGE_INPUT_SIZE as usize,
+            CHALLENGE_INPUT_SIZE,
         );
     }
     Ok(hash_to_bls_field(&eval_challenge))
@@ -834,13 +834,11 @@ fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, KzgError> {
     unsafe {
         scratch_size = blst_p1s_mult_pippenger_scratch_sizeof(len);
     }
-    let mut scratch: Vec<_> = (0..scratch_size).into_iter().map(|_| 0u64).collect();
+    let mut scratch: Vec<_> = (0..scratch_size).map(|_| 0u64).collect();
     let mut p_affine: Vec<_> = (0..len)
-        .into_iter()
         .map(|_| blst_p1_affine::default())
         .collect();
     let mut scalars: Vec<_> = (0..len)
-        .into_iter()
         .map(|_| blst_scalar::default())
         .collect();
 
@@ -892,9 +890,9 @@ fn evaluate_polynomial_in_evaluation_form(
     x: &fr_t,
     s: &KzgSettings,
 ) -> Result<fr_t, KzgError> {
-    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB as usize];
+    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut tmp = blst_fr::default();
-    for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         /*
          * If the point to evaluate at is one of the evaluation points by which
          * the polynomial is given, we can just return the result directly.
@@ -913,16 +911,16 @@ fn evaluate_polynomial_in_evaluation_form(
 
     let mut res = FR_ZERO;
     let mut tmp = fr_t::default();
-    for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         unsafe {
             blst_fr_mul(&mut tmp, &inverses[i], &s.roots_of_unity[i]);
             blst_fr_mul(&mut tmp, &tmp, &p.evals[i]);
             blst_fr_add(&mut res, &res, &tmp);
         }
     }
-    res = fr_div(res, fr_from_u64(FIELD_ELEMENTS_PER_BLOB));
+    res = fr_div(res, fr_from_u64(FIELD_ELEMENTS_PER_BLOB as u64));
     unsafe {
-        blst_fr_sub(&mut tmp, &fr_pow(*x, FIELD_ELEMENTS_PER_BLOB), &FR_ONE);
+        blst_fr_sub(&mut tmp, &fr_pow(*x, FIELD_ELEMENTS_PER_BLOB as u64), &FR_ONE);
         blst_fr_mul(&mut res, &res, &tmp);
     }
     Ok(res)
@@ -976,9 +974,9 @@ fn compute_kzg_proof_impl(
 ) -> Result<(KzgProof, fr_t), KzgError> {
     let mut q = Polynomial::default();
     let y_out = evaluate_polynomial_in_evaluation_form(polynomial, z, s)?;
-    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB as usize];
+    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut m = 0usize;
-    for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         if *z == s.roots_of_unity[i] {
             /* We are asked to compute a KZG proof inside the domain */
             m = i + 1;
@@ -994,7 +992,7 @@ fn compute_kzg_proof_impl(
 
     let mut inverses = fr_batch_inv(&inverses_in)?;
 
-    for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         unsafe {
             blst_fr_mul(&mut q.evals[i], &q.evals[i], &inverses[i]);
         }
@@ -1005,7 +1003,7 @@ fn compute_kzg_proof_impl(
     if m != 0 {
         m -= 1;
         q.evals[m] = FR_ZERO;
-        for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
+        for i in 0..FIELD_ELEMENTS_PER_BLOB {
             if i == m {
                 continue;
             }
@@ -1018,7 +1016,7 @@ fn compute_kzg_proof_impl(
 
         inverses = fr_batch_inv(&inverses_in)?;
 
-        for i in 0..FIELD_ELEMENTS_PER_BLOB as usize {
+        for i in 0..FIELD_ELEMENTS_PER_BLOB {
             if i == m {
                 continue;
             }
@@ -1104,10 +1102,10 @@ fn compute_r_powers(
     proofs_g1: &[g1_t],
 ) -> Result<Vec<fr_t>, KzgError> {
     let n = commitments_g1.len();
-    let input_size = DOMAIN_STR_LENGTH as usize
+    let input_size = DOMAIN_STR_LENGTH
         + std::mem::size_of::<u64>()
         + std::mem::size_of::<u64>()
-        + (n * (BYTES_PER_COMMITMENT + 2 * BYTES_PER_FIELD_ELEMENT + BYTES_PER_PROOF) as usize);
+        + (n * (BYTES_PER_COMMITMENT + 2 * BYTES_PER_FIELD_ELEMENT + BYTES_PER_PROOF));
 
     let mut bytes: Vec<u8> = Vec::with_capacity(input_size);
     /* Copy domain separator */
@@ -1159,8 +1157,8 @@ fn verify_kzg_proof_batch(
     /* Compute the random lincomb challenges */
     let r_powers = compute_r_powers(commitments_g1, zs_fr, ys_fr, proofs_g1)?;
 
-    let mut c_minus_y: Vec<_> = (0..n).into_iter().map(|_| g1_t::default()).collect();
-    let mut r_times_z: Vec<_> = (0..n).into_iter().map(|_| fr_t::default()).collect();
+    let mut c_minus_y: Vec<_> = (0..n).map(|_| g1_t::default()).collect();
+    let mut r_times_z: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
 
     /* Compute \sum r^i * Proof_i */
     let proof_lincomb = g1_lincomb_naive(proofs_g1, &r_powers);
@@ -1217,14 +1215,14 @@ pub fn verify_blob_kzg_proof_batch(
     }
     // Note: Potentially paralellizable
     /* Convert each commitment to a g1 point */
-    let mut commitments_g1: Vec<_> = (0..n).into_iter().map(|_| g1_t::default()).collect();
+    let mut commitments_g1: Vec<_> = (0..n).map(|_| g1_t::default()).collect();
 
     /* Convert each proof to a g1 point */
-    let mut proofs_g1: Vec<_> = (0..n).into_iter().map(|_| g1_t::default()).collect();
+    let mut proofs_g1: Vec<_> = (0..n).map(|_| g1_t::default()).collect();
 
     let mut evaluation_challenges_fr: Vec<_> =
-        (0..n).into_iter().map(|_| fr_t::default()).collect();
-    let mut ys_fr: Vec<_> = (0..n).into_iter().map(|_| fr_t::default()).collect();
+        (0..n).map(|_| fr_t::default()).collect();
+    let mut ys_fr: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
 
     for i in 0..n {
         /* Convert each commitment to a g1 point */
@@ -1285,7 +1283,6 @@ fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>,
 
 fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, KzgError> {
     let mut res: Vec<blst_fr> = (0..width + 1)
-        .into_iter()
         .map(|_| blst_fr::default())
         .collect();
     res[0] = FR_ONE;
@@ -1374,11 +1371,11 @@ fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), KzgError> {
     );
 
     if is_monomial_form {
-        return Err(KzgError::BadArgs(
+        Err(KzgError::BadArgs(
             "is_trusted_setup_in_lagrange_form monomial form".to_string(),
-        ));
+        ))
     } else {
-        return Ok(());
+        Ok(())
     }
 }
 

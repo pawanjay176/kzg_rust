@@ -16,7 +16,7 @@ impl Input {
         for blob in &self.blobs {
             v.push(Blob::from_hex(blob)?);
         }
-        return Ok(v);
+        Ok(v)
     }
 
     pub fn get_commitments(&self) -> Result<Vec<KzgCommitment>, Error> {
