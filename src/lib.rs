@@ -1198,7 +1198,7 @@ pub fn verify_blob_kzg_proof_batch(
     s: &KzgSettings,
 ) -> Result<bool, KzgError> {
     let n = blobs.len();
-    if blobs.len() != commitment_bytes.len() ||  commitment_bytes.len() != proof_bytes.len() {
+    if blobs.len() != commitment_bytes.len() || commitment_bytes.len() != proof_bytes.len() {
         return Err(KzgError::BadArgs(format!(
             "Inconsistent lengths, blobs: {}, commitments: {}, proofs: {}",
             blobs.len(),
@@ -1527,7 +1527,7 @@ mod tests {
             .collect();
         assert!(!test_files.is_empty());
 
-        for (i, test_file) in test_files.iter().enumerate() {
+        for test_file in test_files {
             let yaml_data = fs::read_to_string(test_file).unwrap();
             let test: compute_kzg_proof::Test = serde_yaml::from_str(&yaml_data).unwrap();
             let (Ok(blob), Ok(z)) = (test.input.get_blob(), test.input.get_z()) else {
@@ -1540,15 +1540,7 @@ mod tests {
                     assert_eq!(proof.0.bytes, test.get_output().unwrap().0.bytes);
                     assert_eq!(y.bytes, test.get_output().unwrap().1.bytes);
                 }
-                e => {
-                    if test.get_output().is_some() {
-                        dbg!(e);
-                        dbg!(i);
-                        dbg!(test_file);
-                    }
-
-                    assert!(test.get_output().is_none());
-                }
+                _ => assert!(test.get_output().is_none()),
             }
         }
     }
@@ -1562,7 +1554,7 @@ mod tests {
             .collect();
         assert!(!test_files.is_empty());
 
-        for (i, test_file) in test_files.iter().enumerate() {
+        for test_file in test_files {
             let yaml_data = fs::read_to_string(test_file).unwrap();
             let test: compute_blob_kzg_proof::Test = serde_yaml::from_str(&yaml_data).unwrap();
             let (Ok(blob), Ok(commitment)) = (test.input.get_blob(), test.input.get_commitment())
@@ -1572,17 +1564,9 @@ mod tests {
             };
 
             match compute_blob_kzg_proof(&blob, &KzgCommitment(commitment), &kzg_settings) {
-                Ok(res) => {
-                    dbg!(test_file);
+                Ok(res) => assert_eq!(res.0.bytes, test.get_output().unwrap().bytes),
 
-                    assert_eq!(res.0.bytes, test.get_output().unwrap().bytes);
-                }
-                e => {
-                    if test.get_output().is_some() {
-                        dbg!(e);
-                    }
-                    assert!(test.get_output().is_none());
-                }
+                _ => assert!(test.get_output().is_none()),
             }
         }
     }
@@ -1633,7 +1617,7 @@ mod tests {
             .collect();
         assert!(!test_files.is_empty());
 
-        for (i, test_file) in test_files.iter().enumerate() {
+        for test_file in test_files {
             let yaml_data = fs::read_to_string(test_file).unwrap();
             let test: verify_blob_kzg_proof::Test = serde_yaml::from_str(&yaml_data).unwrap();
             let (Ok(blob), Ok(commitment), Ok(proof)) = (
@@ -1645,8 +1629,6 @@ mod tests {
                 continue;
             };
 
-            dbg!(i);
-            dbg!(test.get_output());
             match verify_blob_kzg_proof(
                 &blob,
                 &KzgCommitment(commitment),
@@ -1679,16 +1661,9 @@ mod tests {
                 assert!(test.get_output().is_none());
                 continue;
             };
-            dbg!(blobs.len());
-            dbg!(commitments.len());
-            dbg!(proofs.len());
             match verify_blob_kzg_proof_batch(&blobs, &commitments, &proofs, &kzg_settings) {
-                Ok(res) => {
-                    if test.get_output().is_none() {
-                        dbg!(test_file);
-                    }
-                    assert_eq!(res, test.get_output().unwrap());
-                }
+                Ok(res) => assert_eq!(res, test.get_output().unwrap()),
+
                 _ => assert!(test.get_output().is_none()),
             }
         }
