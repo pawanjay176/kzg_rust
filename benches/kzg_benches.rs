@@ -2,7 +2,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use kzg_rust::*;
 use rand::{rngs::ThreadRng, Rng};
 
-const TRUSTED_SETUP: &str = "/Users/pawan/rust/kzg_rust/testing_trusted_setups.json";
+const TRUSTED_SETUP: &str = "testing_trusted_setups.json";
 
 fn generate_random_field_element(rng: &mut ThreadRng) -> Bytes32 {
     let mut arr = [0u8; BYTES_PER_FIELD_ELEMENT];
