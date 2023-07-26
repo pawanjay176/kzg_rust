@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::{Blob, KzgCommitment, KzgError as Error, KzgProof};
+use crate::{Blob, Error, KzgCommitment, KzgProof};
 use serde::Deserialize;
 
 #[derive(Deserialize)]

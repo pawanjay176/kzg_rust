@@ -7,13 +7,16 @@ use std::path::Path;
 use BLST_ERROR::BLST_SUCCESS;
 
 #[derive(Debug)]
-pub enum KzgError {
-    #[doc = "< The supplied data is invalid in some way."]
+pub enum Error {
+    /// The supplied data is invalid in some way.
     BadArgs(String),
-    #[doc = "< Internal error - this should never occur."]
+    /// Internal error - this should never occur.
     InternalError,
+    /// The provided bytes are of incorrect length.
     InvalidBytesLength(String),
+    /// Error when converting from hex to bytes.
     InvalidHexFormat(String),
+    /// The provided trusted setup params are invalid.
     InvalidTrustedSetup(String),
 }
 
@@ -39,6 +42,8 @@ pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
 pub const BYTES_PER_COMMITMENT: usize = 48;
 pub const BYTES_PER_PROOF: usize = 48;
 
+/// const function for returning `FIELD_ELEMENTS_PER_BLOB` value
+/// given the feature flag.
 pub const fn field_elements_per_blob() -> usize {
     if cfg!(feature = "minimal") {
         4
@@ -399,10 +404,10 @@ const FR_ONE: fr_t = fr_t {
 };
 
 /// Converts a hex string (with or without the 0x prefix) to bytes.
-pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, KzgError> {
+pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, Error> {
     let trimmed_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
     hex::decode(trimmed_str)
-        .map_err(|e| KzgError::InvalidHexFormat(format!("Failed to decode hex: {}", e)))
+        .map_err(|e| Error::InvalidHexFormat(format!("Failed to decode hex: {}", e)))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -424,9 +429,9 @@ pub struct Bytes32 {
 }
 
 impl Bytes32 {
-    pub fn from_bytes(b: &[u8]) -> Result<Self, KzgError> {
+    pub fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         if b.len() != 32 {
-            return Err(KzgError::BadArgs(format!(
+            return Err(Error::BadArgs(format!(
                 "Bytes32 length error. Expected 32, got {}",
                 b.len()
             )));
@@ -436,7 +441,7 @@ impl Bytes32 {
         Ok(Bytes32 { bytes: arr })
     }
 
-    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+    pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Self::from_bytes(&hex_to_bytes(hex_str)?)
     }
 }
@@ -447,9 +452,9 @@ pub struct Bytes48 {
 }
 
 impl Bytes48 {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, KzgError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != 48 {
-            return Err(KzgError::InvalidBytesLength(format!(
+            return Err(Error::InvalidBytesLength(format!(
                 "Invalid byte length. Expected {} got {}",
                 32,
                 bytes.len(),
@@ -460,7 +465,7 @@ impl Bytes48 {
         Ok(Self { bytes: new_bytes })
     }
 
-    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+    pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Self::from_bytes(&hex_to_bytes(hex_str)?)
     }
 }
@@ -477,9 +482,9 @@ pub struct Blob {
 }
 
 impl Blob {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, KzgError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != BYTES_PER_BLOB {
-            return Err(KzgError::InvalidBytesLength(format!(
+            return Err(Error::InvalidBytesLength(format!(
                 "Invalid byte length. Expected {} got {}",
                 BYTES_PER_BLOB,
                 bytes.len(),
@@ -492,7 +497,7 @@ impl Blob {
         })
     }
 
-    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+    pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Self::from_bytes(&hex_to_bytes(hex_str)?)
     }
 }
@@ -501,7 +506,7 @@ impl Blob {
 pub struct KzgCommitment(pub Bytes48);
 
 impl KzgCommitment {
-    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+    pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Ok(Self(Bytes48::from_bytes(&hex_to_bytes(hex_str)?)?))
     }
 }
@@ -510,7 +515,7 @@ impl KzgCommitment {
 pub struct KzgProof(pub Bytes48);
 
 impl KzgProof {
-    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+    pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Ok(Self(Bytes48::from_bytes(&hex_to_bytes(hex_str)?)?))
     }
 }
@@ -564,9 +569,9 @@ fn fr_from_u64(n: u64) -> fr_t {
     }
 }
 
-fn fr_batch_inv(a: &[fr_t]) -> Result<Vec<fr_t>, KzgError> {
+fn fr_batch_inv(a: &[fr_t]) -> Result<Vec<fr_t>, Error> {
     if a.is_empty() {
-        return Err(KzgError::BadArgs("fr_batch_inv input is empty".to_string()));
+        return Err(Error::BadArgs("fr_batch_inv input is empty".to_string()));
     }
     let mut res: Vec<fr_t> = Vec::with_capacity(a.len());
     let mut accumulator = FR_ONE;
@@ -578,7 +583,7 @@ fn fr_batch_inv(a: &[fr_t]) -> Result<Vec<fr_t>, KzgError> {
     }
     // Bail on zero input
     if fr_is_zero(&accumulator) {
-        return Err(KzgError::BadArgs("fr_batch_inv zero input".to_string()));
+        return Err(Error::BadArgs("fr_batch_inv zero input".to_string()));
     }
 
     unsafe {
@@ -710,13 +715,13 @@ fn hash_to_bls_field(b: &Bytes32) -> fr_t {
     res
 }
 
-fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, KzgError> {
+fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
     let mut tmp = blst_scalar::default();
     let mut res = fr_t::default();
     unsafe {
         blst_scalar_from_bendian(&mut tmp, b.bytes.as_ptr());
         if !blst_scalar_fr_check(&tmp) {
-            return Err(KzgError::BadArgs(
+            return Err(Error::BadArgs(
                 "bytes_to_bls_field Invalid bytes32".to_string(),
             ));
         }
@@ -725,7 +730,7 @@ fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, KzgError> {
     }
 }
 
-fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, KzgError> {
+fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, Error> {
     let mut p1_affine = blst_p1_affine::default();
     let mut res = g1_t::default();
 
@@ -735,7 +740,7 @@ fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, KzgError> {
     unsafe {
         let ret = blst_p1_uncompress(&mut p1_affine, b.bytes.as_ptr());
         if ret != BLST_SUCCESS {
-            return Err(KzgError::BadArgs(format!(
+            return Err(Error::BadArgs(format!(
                 "validate_kzg_g1 blst_p1_uncompress failed err {:?}",
                 res
             )));
@@ -747,7 +752,7 @@ fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, KzgError> {
         }
         /* The point must be on the right subgroup */
         if !blst_p1_in_g1(&res) {
-            return Err(KzgError::BadArgs(
+            return Err(Error::BadArgs(
                 "validate_kzg_g1 not in right subgroup".to_string(),
             ));
         }
@@ -755,15 +760,15 @@ fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, KzgError> {
     Ok(res)
 }
 
-pub fn bytes_to_kzg_commitment(b: &Bytes48) -> Result<g1_t, KzgError> {
+pub fn bytes_to_kzg_commitment(b: &Bytes48) -> Result<g1_t, Error> {
     validate_kzg_g1(b)
 }
 
-pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, KzgError> {
+pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
     validate_kzg_g1(b)
 }
 
-fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
+fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, Error> {
     let mut poly = Polynomial::default();
     for i in 0..field_elements_per_blob() {
         let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
@@ -776,7 +781,7 @@ fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
 
 /// Note: using commitment_bytes instead of g1_t like the c code since
 /// we seem to be doing unnecessary conversions
-fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, KzgError> {
+fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, Error> {
     let mut bytes = [0u8; CHALLENGE_INPUT_SIZE];
     let mut offset = 0;
 
@@ -800,7 +805,7 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, Kz
     /* Copy commitment */
     // Check if commitment bytes are a valid g1 point
     if bytes_to_kzg_commitment(commitment_bytes).is_err() {
-        return Err(KzgError::BadArgs("Invalid commitment bytes".to_string()));
+        return Err(Error::BadArgs("Invalid commitment bytes".to_string()));
     }
     bytes[offset..offset + BYTES_PER_COMMITMENT].copy_from_slice(commitment_bytes.bytes.as_slice());
     offset += BYTES_PER_COMMITMENT;
@@ -832,7 +837,7 @@ fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
     res
 }
 
-fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, KzgError> {
+fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
     let len = p.len();
     if len < 8 {
         return Ok(g1_lincomb_naive(p, coeffs));
@@ -893,7 +898,7 @@ fn evaluate_polynomial_in_evaluation_form(
     p: &Polynomial,
     x: &fr_t,
     s: &KzgSettings,
-) -> Result<fr_t, KzgError> {
+) -> Result<fr_t, Error> {
     let mut inverses_in = [fr_t::default(); field_elements_per_blob()];
     let mut tmp = blst_fr::default();
     for i in 0..field_elements_per_blob() {
@@ -938,11 +943,11 @@ fn evaluate_polynomial_in_evaluation_form(
 // KZG Functions
 ///////////////////////////////////////////////////////////////////////////////
 
-fn poly_to_kzg_commitment(p: &Polynomial, s: &KzgSettings) -> Result<g1_t, KzgError> {
+fn poly_to_kzg_commitment(p: &Polynomial, s: &KzgSettings) -> Result<g1_t, Error> {
     g1_lincomb_fast(&s.g1_values, &p.evals.as_slice())
 }
 
-pub fn blob_to_kzg_commitment(blob: &Blob, s: &KzgSettings) -> Result<KzgCommitment, KzgError> {
+pub fn blob_to_kzg_commitment(blob: &Blob, s: &KzgSettings) -> Result<KzgCommitment, Error> {
     let poly = blob_to_polynomial(blob)?;
     let commitment = poly_to_kzg_commitment(&poly, s)?;
     let commitment_bytes = bytes_from_g1(&commitment);
@@ -953,7 +958,7 @@ pub fn compute_kzg_proof(
     blob: &Blob,
     z_bytes: &Bytes32,
     s: &KzgSettings,
-) -> Result<(KzgProof, Bytes32), KzgError> {
+) -> Result<(KzgProof, Bytes32), Error> {
     let poly = blob_to_polynomial(blob)?;
     let fr_z = bytes_to_bls_field(z_bytes)?;
 
@@ -966,7 +971,7 @@ pub fn compute_blob_kzg_proof(
     blob: &Blob,
     commitment_bytes: &KzgCommitment,
     s: &KzgSettings,
-) -> Result<KzgProof, KzgError> {
+) -> Result<KzgProof, Error> {
     let poly = blob_to_polynomial(blob)?;
     /* Compute the challenge for the given blob/commitment */
     let evaluation_challenge_fr = compute_challenge(blob, &commitment_bytes.0)?;
@@ -979,7 +984,7 @@ fn compute_kzg_proof_impl(
     polynomial: &Polynomial,
     z: &fr_t,
     s: &KzgSettings,
-) -> Result<(KzgProof, fr_t), KzgError> {
+) -> Result<(KzgProof, fr_t), Error> {
     let mut q = Polynomial::default();
     let y_out = evaluate_polynomial_in_evaluation_form(polynomial, z, s)?;
     let mut inverses_in = [fr_t::default(); field_elements_per_blob()];
@@ -1069,7 +1074,7 @@ pub fn verify_kzg_proof(
     y_bytes: &Bytes32,
     proof_bytes: &KzgProof,
     s: &KzgSettings,
-) -> Result<bool, KzgError> {
+) -> Result<bool, Error> {
     let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
     let z = bytes_to_bls_field(z_bytes)?;
     let y = bytes_to_bls_field(y_bytes)?;
@@ -1084,7 +1089,7 @@ pub fn verify_blob_kzg_proof(
     commitment_bytes: &KzgCommitment,
     proof_bytes: &KzgProof,
     s: &KzgSettings,
-) -> Result<bool, KzgError> {
+) -> Result<bool, Error> {
     let poly = blob_to_polynomial(blob)?;
     let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
     let proof = bytes_to_kzg_proof(&proof_bytes.0)?;
@@ -1108,7 +1113,7 @@ fn compute_r_powers(
     zs_fr: &[fr_t],
     ys_fr: &[fr_t],
     proofs_g1: &[g1_t],
-) -> Result<Vec<fr_t>, KzgError> {
+) -> Result<Vec<fr_t>, Error> {
     let n = commitments_g1.len();
     let input_size = DOMAIN_STR_LENGTH
         + std::mem::size_of::<u64>()
@@ -1136,7 +1141,7 @@ fn compute_r_powers(
         bytes.extend_from_slice(&bytes_from_g1(&proofs_g1[i]).bytes);
     }
     if bytes.len() != input_size {
-        return Err(KzgError::InternalError);
+        return Err(Error::InternalError);
     }
     /* Now let's create the challenge! */
     let mut r_bytes = Bytes32::default();
@@ -1153,11 +1158,11 @@ fn verify_kzg_proof_batch(
     ys_fr: &[fr_t],
     proofs_g1: &[g1_t],
     s: &KzgSettings,
-) -> Result<bool, KzgError> {
+) -> Result<bool, Error> {
     let n = commitments_g1.len();
 
     if n == 0 {
-        return Err(KzgError::BadArgs(
+        return Err(Error::BadArgs(
             "verify_kzg_proof_batch empty input".to_string(),
         ));
     }
@@ -1202,10 +1207,10 @@ pub fn verify_blob_kzg_proof_batch(
     commitment_bytes: &[KzgCommitment],
     proof_bytes: &[KzgProof],
     s: &KzgSettings,
-) -> Result<bool, KzgError> {
+) -> Result<bool, Error> {
     let n = blobs.len();
     if blobs.len() != commitment_bytes.len() || commitment_bytes.len() != proof_bytes.len() {
-        return Err(KzgError::BadArgs(format!(
+        return Err(Error::BadArgs(format!(
             "Inconsistent lengths, blobs: {}, commitments: {}, proofs: {}",
             blobs.len(),
             commitment_bytes.len(),
@@ -1272,9 +1277,9 @@ fn reverse_bits(mut n: u32, order: u32) -> u32 {
 }
 
 /// NOTE: Not swapping in place like the c code, returns a new vector
-fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>, KzgError> {
+fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>, Error> {
     if values.is_empty() || n >> 32 != 0 || !n.is_power_of_two() || n.ilog2() == 0 {
-        return Err(KzgError::BadArgs(
+        return Err(Error::BadArgs(
             "bit_reversal_permutation invalid args".to_string(),
         ));
     }
@@ -1288,7 +1293,7 @@ fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>,
     Ok(res)
 }
 
-fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, KzgError> {
+fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, Error> {
     let mut res: Vec<blst_fr> = (0..width + 1).map(|_| blst_fr::default()).collect();
     res[0] = FR_ONE;
     res[1] = *root;
@@ -1298,9 +1303,7 @@ fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, KzgError> 
 
     while !fr_is_one(&res[i - 1]) {
         if i > width as usize {
-            return Err(KzgError::BadArgs(
-                "expand_root_of_unity i > width".to_string(),
-            ));
+            return Err(Error::BadArgs("expand_root_of_unity i > width".to_string()));
         }
         unsafe {
             blst_fr_mul(&mut tmp, &res[i - 1], root);
@@ -1310,20 +1313,20 @@ fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, KzgError> 
     }
 
     if !fr_is_one(&res[width as usize]) {
-        return Err(KzgError::BadArgs(
+        return Err(Error::BadArgs(
             "expand_root_of_unity assertion failed".to_string(),
         ));
     }
     Ok(res)
 }
 
-fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, KzgError> {
+fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, Error> {
     /* Calculate the max width */
     let max_width = 1 << max_scale;
 
     /* Get the root of unity */
     if max_scale >= SCALE2_ROOT_OF_UNITY.len() as u32 {
-        return Err(KzgError::BadArgs(
+        return Err(Error::BadArgs(
             "compute_roots_of_unity max_scale too large".to_string(),
         ));
     }
@@ -1354,10 +1357,10 @@ fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, KzgError> {
     Ok(roots_of_unity_out)
 }
 
-fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), KzgError> {
+fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), Error> {
     /* Trusted setup is too small; we can't work with this */
     if s.g1_values.len() < 2 || s.g2_values.len() < 2 {
-        return Err(KzgError::BadArgs(
+        return Err(Error::BadArgs(
             "is_trusted_setup_in_lagrange_form invalid args".to_string(),
         ));
     }
@@ -1376,7 +1379,7 @@ fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), KzgError> {
     );
 
     if is_monomial_form {
-        Err(KzgError::BadArgs(
+        Err(Error::BadArgs(
             "is_trusted_setup_in_lagrange_form monomial form".to_string(),
         ))
     } else {
@@ -1389,13 +1392,13 @@ pub fn load_trusted_setup(
     g2_bytes: Vec<u8>,
     n1: usize,
     n2: usize,
-) -> Result<KzgSettings, KzgError> {
+) -> Result<KzgSettings, Error> {
     let mut kzg_settings = KzgSettings::default();
 
     /* Sanity check in case this is called directly */
 
     if n1 != TRUSTED_SETUP_NUM_G1_POINTS || n2 != TRUSTED_SETUP_NUM_G2_POINTS {
-        return Err(KzgError::BadArgs(
+        return Err(Error::BadArgs(
             "load_trusted_setup invalid params".to_string(),
         ));
     }
@@ -1415,7 +1418,7 @@ pub fn load_trusted_setup(
         unsafe {
             let err = blst_p1_uncompress(&mut g1_affine, &g1_bytes[BYTES_PER_G1 * i]);
             if err != BLST_SUCCESS {
-                return Err(KzgError::BadArgs(
+                return Err(Error::BadArgs(
                     "load_trusted_setup Invalid g1 bytes".to_string(),
                 ));
             }
@@ -1430,7 +1433,7 @@ pub fn load_trusted_setup(
         unsafe {
             let err = blst_p2_uncompress(&mut g2_affine, &g2_bytes[BYTES_PER_G2 * i]);
             if err != BLST_SUCCESS {
-                return Err(KzgError::BadArgs(
+                return Err(Error::BadArgs(
                     "load_trusted_setup invalid g2 bytes".to_string(),
                 ));
             }
@@ -1529,9 +1532,9 @@ impl Deref for KzgCommitment {
 
 pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
     trusted_setup_json_file: P,
-) -> Result<KzgSettings, KzgError> {
+) -> Result<KzgSettings, Error> {
     let trusted_setup_file = std::fs::File::open(trusted_setup_json_file)
-        .map_err(|e| KzgError::InvalidTrustedSetup(e.to_string()))?;
+        .map_err(|e| Error::InvalidTrustedSetup(e.to_string()))?;
     let trusted_setup: trusted_setup::TrustedSetup =
         serde_json::from_reader(&trusted_setup_file).unwrap();
     let n1 = trusted_setup.g1_len();
@@ -1571,12 +1574,6 @@ mod tests {
         "../../ethereum/c-kzg-4844/tests/verify_blob_kzg_proof/*/*/*";
     const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str =
         "../../ethereum/c-kzg-4844/tests/verify_blob_kzg_proof_batch/*/*/*";
-
-    #[cfg(feature = "minimal")]
-    #[test]
-    fn test_field_elements() {
-        assert_eq!(field_elements_per_blob(), 4);
-    }
 
     #[cfg(not(feature = "minimal"))]
     #[test]
