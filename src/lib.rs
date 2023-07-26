@@ -2,6 +2,7 @@ mod test_formats;
 pub mod trusted_setup;
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
+use std::path::Path;
 
 use BLST_ERROR::BLST_SUCCESS;
 
@@ -13,6 +14,7 @@ pub enum KzgError {
     InternalError,
     InvalidBytesLength(String),
     InvalidHexFormat(String),
+    InvalidTrustedSetup(String),
 }
 
 /**
@@ -1443,15 +1445,113 @@ pub fn load_trusted_setup(
     Ok(kzg_settings)
 }
 
+impl From<[u8; BYTES_PER_COMMITMENT]> for KzgCommitment {
+    fn from(value: [u8; BYTES_PER_COMMITMENT]) -> Self {
+        Self(Bytes48 { bytes: value })
+    }
+}
+
+impl From<[u8; BYTES_PER_PROOF]> for KzgProof {
+    fn from(value: [u8; BYTES_PER_PROOF]) -> Self {
+        Self(Bytes48 { bytes: value })
+    }
+}
+
+impl From<[u8; BYTES_PER_BLOB]> for Blob {
+    fn from(value: [u8; BYTES_PER_BLOB]) -> Self {
+        Self { bytes: value }
+    }
+}
+
+impl From<[u8; 32]> for Bytes32 {
+    fn from(value: [u8; 32]) -> Self {
+        Self { bytes: value }
+    }
+}
+
+impl From<[u8; 48]> for Bytes48 {
+    fn from(value: [u8; 48]) -> Self {
+        Self { bytes: value }
+    }
+}
+
+use std::ops::{Deref, DerefMut};
+
+impl Deref for Bytes32 {
+    type Target = [u8; 32];
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
+    }
+}
+
+impl Deref for Bytes48 {
+    type Target = [u8; 48];
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
+    }
+}
+
+impl Deref for Blob {
+    type Target = [u8; BYTES_PER_BLOB];
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
+    }
+}
+
+impl DerefMut for Blob {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bytes
+    }
+}
+
+impl Deref for KzgProof {
+    type Target = [u8; BYTES_PER_PROOF];
+    fn deref(&self) -> &Self::Target {
+        &self.0.bytes
+    }
+}
+
+impl Deref for KzgCommitment {
+    type Target = [u8; BYTES_PER_COMMITMENT];
+    fn deref(&self) -> &Self::Target {
+        &self.0.bytes
+    }
+}
+
+pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
+    trusted_setup_json_file: P,
+) -> Result<KzgSettings, KzgError> {
+    let trusted_setup_file = std::fs::File::open(trusted_setup_json_file)
+        .map_err(|e| KzgError::InvalidTrustedSetup(e.to_string()))?;
+    let trusted_setup: trusted_setup::TrustedSetup =
+        serde_json::from_reader(&trusted_setup_file).unwrap();
+    let n1 = trusted_setup.g1_len();
+    let n2 = trusted_setup.g2_len();
+    let g1_points = trusted_setup
+        .g1_points()
+        .into_iter()
+        .fold(vec![], |mut acc, x| {
+            acc.extend_from_slice(&x);
+            acc
+        });
+    let g2_points = trusted_setup
+        .g2_points()
+        .into_iter()
+        .fold(vec![], |mut acc, x| {
+            acc.extend_from_slice(&x);
+            acc
+        });
+    load_trusted_setup(g1_points, g2_points, n1, n2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
     use test_formats::*;
-    use trusted_setup::TrustedSetup;
 
-    const TRUSTED_SETUP: &[u8] = include_bytes!("../testing_trusted_setups.json");
+    const TRUSTED_SETUP: &str = "testing_trusted_setups.json";
     const BLOB_TO_KZG_COMMITMENT_TESTS: &str =
         "/Users/pawan/ethereum/c-kzg-4844/tests/blob_to_kzg_commitment/*/*/*";
     const COMPUTE_KZG_PROOF_TESTS: &str =
@@ -1465,31 +1565,9 @@ mod tests {
     const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str =
         "/Users/pawan/ethereum/c-kzg-4844/tests/verify_blob_kzg_proof_batch/*/*/*";
 
-    fn load_trusted_setup_from_file() -> KzgSettings {
-        let trusted_setup: TrustedSetup = serde_json::from_reader(TRUSTED_SETUP).unwrap();
-        let n1 = trusted_setup.g1_len();
-        let n2 = trusted_setup.g2_len();
-        dbg!(n1, n2);
-        let g1_points = trusted_setup
-            .g1_points()
-            .into_iter()
-            .fold(vec![], |mut acc, x| {
-                acc.extend_from_slice(&x);
-                acc
-            });
-        let g2_points = trusted_setup
-            .g2_points()
-            .into_iter()
-            .fold(vec![], |mut acc, x| {
-                acc.extend_from_slice(&x);
-                acc
-            });
-        load_trusted_setup(g1_points, g2_points, n1, n2).unwrap()
-    }
-
     #[test]
     fn test_blob_to_kzg_commitment() {
-        let kzg_settings = load_trusted_setup_from_file();
+        let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(BLOB_TO_KZG_COMMITMENT_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1513,7 +1591,7 @@ mod tests {
 
     #[test]
     fn test_compute_kzg_proof() {
-        let kzg_settings = load_trusted_setup_from_file();
+        let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(COMPUTE_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1540,7 +1618,7 @@ mod tests {
 
     #[test]
     fn test_compute_blob_kzg_proof() {
-        let kzg_settings = load_trusted_setup_from_file();
+        let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(COMPUTE_BLOB_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1566,7 +1644,7 @@ mod tests {
 
     #[test]
     fn test_verify_kzg_proof() {
-        let kzg_settings = load_trusted_setup_from_file();
+        let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(VERIFY_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1603,7 +1681,7 @@ mod tests {
 
     #[test]
     fn test_verify_blob_kzg_proof() {
-        let kzg_settings = load_trusted_setup_from_file();
+        let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(VERIFY_BLOB_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1636,7 +1714,7 @@ mod tests {
 
     #[test]
     fn test_verify_blob_kzg_proof_batch() {
-        let kzg_settings = load_trusted_setup_from_file();
+        let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(VERIFY_BLOB_KZG_PROOF_BATCH_TESTS)
             .unwrap()
             .map(Result::unwrap)

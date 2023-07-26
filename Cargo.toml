@@ -9,13 +9,13 @@ edition = "2021"
 blst = {git = "https://github.com/supranational/blst"}
 hex = "0.4.3"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.103"
 
 [dev-dependencies]
 glob = "0.3.1"
 serde_yaml = "0.9.25"
 criterion = "0.4"
 rand = "0.8.5"
-serde_json = "1.0.103"
 
 [[bench]]
 name = "kzg_benches"
