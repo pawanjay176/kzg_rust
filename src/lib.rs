@@ -489,8 +489,20 @@ impl Blob {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct KzgCommitment(pub Bytes48);
 
+impl KzgCommitment {
+    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+        Ok(Self(Bytes48::from_bytes(&hex_to_bytes(hex_str)?)?))
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct KzgProof(pub Bytes48);
+
+impl KzgProof {
+    pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
+        Ok(Self(Bytes48::from_bytes(&hex_to_bytes(hex_str)?)?))
+    }
+}
 
 /* Helper Functions */
 
@@ -501,7 +513,6 @@ fn fr_is_one(p: &fr_t) -> bool {
 fn fr_is_zero(p: &fr_t) -> bool {
     *p == FR_ZERO
 }
-
 
 fn fr_div(a: fr_t, b: fr_t) -> fr_t {
     let mut tmp = blst_fr::default();
@@ -1086,6 +1097,159 @@ pub fn verify_blob_kzg_proof(
     ))
 }
 
+fn compute_r_powers(
+    commitments_g1: &[g1_t],
+    zs_fr: &[fr_t],
+    ys_fr: &[fr_t],
+    proofs_g1: &[g1_t],
+) -> Result<Vec<fr_t>, KzgError> {
+    let n = commitments_g1.len();
+    let input_size = DOMAIN_STR_LENGTH as usize
+        + std::mem::size_of::<u64>()
+        + std::mem::size_of::<u64>()
+        + (n * (BYTES_PER_COMMITMENT + 2 * BYTES_PER_FIELD_ELEMENT + BYTES_PER_PROOF) as usize);
+
+    let mut bytes: Vec<u8> = Vec::with_capacity(input_size);
+    /* Copy domain separator */
+    bytes.extend_from_slice(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN.as_bytes());
+
+    /* Copy degree of the polynomial */
+    bytes.extend_from_slice(&FIELD_ELEMENTS_PER_BLOB.to_be_bytes());
+
+    /* Copy number of commitments */
+    bytes.extend_from_slice(&n.to_be_bytes());
+
+    for i in 0..n {
+        /* Copy commitment */
+        bytes.extend_from_slice(&bytes_from_g1(&commitments_g1[i]).bytes);
+        /* Copy z */
+        bytes.extend_from_slice(&bytes_from_bls_field(&zs_fr[i]).bytes);
+        /* Copy y */
+        bytes.extend_from_slice(&bytes_from_bls_field(&ys_fr[i]).bytes);
+        /* Copy proof */
+        bytes.extend_from_slice(&bytes_from_g1(&proofs_g1[i]).bytes);
+    }
+    if bytes.len() != input_size {
+        return Err(KzgError::InternalError);
+    }
+    /* Now let's create the challenge! */
+    let mut r_bytes = Bytes32::default();
+    unsafe {
+        blst_sha256(r_bytes.bytes.as_mut_ptr(), bytes.as_ptr(), input_size);
+    }
+    let r = hash_to_bls_field(&r_bytes);
+    Ok(compute_powers(&r, n))
+}
+
+fn verify_kzg_proof_batch(
+    commitments_g1: &[g1_t],
+    zs_fr: &[fr_t],
+    ys_fr: &[fr_t],
+    proofs_g1: &[g1_t],
+    s: &KzgSettings,
+) -> Result<bool, KzgError> {
+    let n = commitments_g1.len();
+
+    if n == 0 {
+        return Err(KzgError::BadArgs(
+            "verify_kzg_proof_batch empty input".to_string(),
+        ));
+    }
+
+    /* Compute the random lincomb challenges */
+    let r_powers = compute_r_powers(commitments_g1, zs_fr, ys_fr, proofs_g1)?;
+
+    let mut c_minus_y: Vec<_> = (0..n).into_iter().map(|_| g1_t::default()).collect();
+    let mut r_times_z: Vec<_> = (0..n).into_iter().map(|_| fr_t::default()).collect();
+
+    /* Compute \sum r^i * Proof_i */
+    let proof_lincomb = g1_lincomb_naive(proofs_g1, &r_powers);
+
+    for i in 0..n {
+        /* Get [y_i] */
+        let ys_encrypted = g1_mul(&G1_GENERATOR, &ys_fr[i]);
+        /* Get C_i - [y_i] */
+        c_minus_y[i] = g1_sub(&commitments_g1[i], &ys_encrypted);
+        /* Get r^i * z_i */
+        unsafe {
+            blst_fr_mul(&mut r_times_z[i], &r_powers[i], &zs_fr[i]);
+        }
+    }
+    /* Get \sum r^i z_i Proof_i */
+    let proof_z_lincomb = g1_lincomb_naive(proofs_g1, &r_times_z);
+
+    let c_minus_y_lincomb = g1_lincomb_naive(&c_minus_y, &r_powers);
+
+    let mut rhs_g1 = blst_p1::default();
+    /* Get C_minus_y_lincomb + proof_z_lincomb */
+    unsafe {
+        blst_p1_add_or_double(&mut rhs_g1, &c_minus_y_lincomb, &proof_z_lincomb);
+    }
+
+    /* Do the pairing check! */
+    let res = pairings_verify(&proof_lincomb, &s.g2_values[1], &rhs_g1, &G2_GENERATOR);
+    Ok(res)
+}
+
+pub fn verify_blob_kzg_proof_batch(
+    blobs: &[Blob],
+    commitment_bytes: &[KzgCommitment],
+    proof_bytes: &[KzgProof],
+    s: &KzgSettings,
+) -> Result<bool, KzgError> {
+    let n = blobs.len();
+    if blobs.len() != commitment_bytes.len() ||  commitment_bytes.len() != proof_bytes.len() {
+        return Err(KzgError::BadArgs(format!(
+            "Inconsistent lengths, blobs: {}, commitments: {}, proofs: {}",
+            blobs.len(),
+            commitment_bytes.len(),
+            proof_bytes.len()
+        )));
+    }
+    /* Exit early if we are given zero blobs */
+    if n == 0 {
+        return Ok(true);
+    }
+
+    /* For a single blob, just do a regular single verification */
+    if n == 1 {
+        return verify_blob_kzg_proof(&blobs[0], &commitment_bytes[0], &proof_bytes[0], s);
+    }
+    // Note: Potentially paralellizable
+    /* Convert each commitment to a g1 point */
+    let mut commitments_g1: Vec<_> = (0..n).into_iter().map(|_| g1_t::default()).collect();
+
+    /* Convert each proof to a g1 point */
+    let mut proofs_g1: Vec<_> = (0..n).into_iter().map(|_| g1_t::default()).collect();
+
+    let mut evaluation_challenges_fr: Vec<_> =
+        (0..n).into_iter().map(|_| fr_t::default()).collect();
+    let mut ys_fr: Vec<_> = (0..n).into_iter().map(|_| fr_t::default()).collect();
+
+    for i in 0..n {
+        /* Convert each commitment to a g1 point */
+        commitments_g1[i] = bytes_to_kzg_commitment(&commitment_bytes[i].0)?;
+        /* Convert each blob from bytes to a poly */
+        let polynomial = blob_to_polynomial(&blobs[i])?;
+
+        evaluation_challenges_fr[i] = compute_challenge(&blobs[i], &commitment_bytes[i].0)?;
+
+        ys_fr[i] =
+            evaluate_polynomial_in_evaluation_form(&polynomial, &evaluation_challenges_fr[i], s)?;
+
+        proofs_g1[i] = bytes_to_kzg_proof(&proof_bytes[i].0)?;
+    }
+
+    let res = verify_kzg_proof_batch(
+        &commitments_g1,
+        &evaluation_challenges_fr,
+        &ys_fr,
+        &proofs_g1,
+        s,
+    )?;
+    Ok(res)
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Trusted Setup Functions
 ///////////////////////////////////////////////////////////////////////////////
@@ -1305,6 +1469,8 @@ mod tests {
         "/Users/pawan/ethereum/c-kzg-4844/tests/verify_kzg_proof/*/*/*";
     const VERIFY_BLOB_KZG_PROOF_TESTS: &str =
         "/Users/pawan/ethereum/c-kzg-4844/tests/verify_blob_kzg_proof/*/*/*";
+    const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str =
+        "/Users/pawan/ethereum/c-kzg-4844/tests/verify_blob_kzg_proof_batch/*/*/*";
 
     fn load_trusted_setup_from_file() -> KzgSettings {
         let trusted_setup: TrustedSetup = serde_json::from_reader(TRUSTED_SETUP).unwrap();
@@ -1488,6 +1654,41 @@ mod tests {
                 &kzg_settings,
             ) {
                 Ok(res) => assert_eq!(res, test.get_output().unwrap()),
+                _ => assert!(test.get_output().is_none()),
+            }
+        }
+    }
+
+    #[test]
+    fn test_verify_blob_kzg_proof_batch() {
+        let kzg_settings = load_trusted_setup_from_file();
+        let test_files: Vec<PathBuf> = glob::glob(VERIFY_BLOB_KZG_PROOF_BATCH_TESTS)
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(!test_files.is_empty());
+
+        for test_file in test_files {
+            let yaml_data = fs::read_to_string(&test_file).unwrap();
+            let test: verify_blob_kzg_proof_batch::Test = serde_yaml::from_str(&yaml_data).unwrap();
+            let (Ok(blobs), Ok(commitments), Ok(proofs)) = (
+                test.input.get_blobs(),
+                test.input.get_commitments(),
+                test.input.get_proofs(),
+            ) else {
+                assert!(test.get_output().is_none());
+                continue;
+            };
+            dbg!(blobs.len());
+            dbg!(commitments.len());
+            dbg!(proofs.len());
+            match verify_blob_kzg_proof_batch(&blobs, &commitments, &proofs, &kzg_settings) {
+                Ok(res) => {
+                    if test.get_output().is_none() {
+                        dbg!(test_file);
+                    }
+                    assert_eq!(res, test.get_output().unwrap());
+                }
                 _ => assert!(test.get_output().is_none()),
             }
         }
