@@ -1,8 +1,6 @@
 use crate::{BYTES_PER_G1, BYTES_PER_G2, FIELD_ELEMENTS_PER_BLOB};
-use serde::{
-    de::{self, Deserializer, Visitor},
-};
-use serde::{Serialize, Deserialize};
+use serde::de::{self, Deserializer, Visitor};
+use serde::{Deserialize, Serialize};
 
 /// Wrapper over a BLS G1 point's byte representation.
 #[derive(Debug, Clone, PartialEq)]

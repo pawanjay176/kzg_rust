@@ -559,10 +559,10 @@ fn fr_batch_inv(a: &[fr_t]) -> Result<Vec<fr_t>, KzgError> {
     }
     let mut res: Vec<fr_t> = Vec::with_capacity(a.len());
     let mut accumulator = FR_ONE;
-    for i in 0..a.len() {
+    for elem in a {
         res.push(accumulator);
         unsafe {
-            blst_fr_mul(&mut accumulator, &accumulator, &a[i]);
+            blst_fr_mul(&mut accumulator, &accumulator, elem);
         }
     }
     // Bail on zero input
@@ -793,8 +793,7 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, Kz
     if bytes_to_kzg_commitment(commitment_bytes).is_err() {
         return Err(KzgError::BadArgs("Invalid commitment bytes".to_string()));
     }
-    bytes[offset..offset + BYTES_PER_COMMITMENT]
-        .copy_from_slice(commitment_bytes.bytes.as_slice());
+    bytes[offset..offset + BYTES_PER_COMMITMENT].copy_from_slice(commitment_bytes.bytes.as_slice());
     offset += BYTES_PER_COMMITMENT;
 
     /* Make sure we wrote the entire buffer */
@@ -835,12 +834,8 @@ fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, KzgError> {
         scratch_size = blst_p1s_mult_pippenger_scratch_sizeof(len);
     }
     let mut scratch: Vec<_> = (0..scratch_size).map(|_| 0u64).collect();
-    let mut p_affine: Vec<_> = (0..len)
-        .map(|_| blst_p1_affine::default())
-        .collect();
-    let mut scalars: Vec<_> = (0..len)
-        .map(|_| blst_scalar::default())
-        .collect();
+    let mut p_affine: Vec<_> = (0..len).map(|_| blst_p1_affine::default()).collect();
+    let mut scalars: Vec<_> = (0..len).map(|_| blst_scalar::default()).collect();
 
     /* Transform the points to affine representation */
     unsafe {
@@ -920,7 +915,11 @@ fn evaluate_polynomial_in_evaluation_form(
     }
     res = fr_div(res, fr_from_u64(FIELD_ELEMENTS_PER_BLOB as u64));
     unsafe {
-        blst_fr_sub(&mut tmp, &fr_pow(*x, FIELD_ELEMENTS_PER_BLOB as u64), &FR_ONE);
+        blst_fr_sub(
+            &mut tmp,
+            &fr_pow(*x, FIELD_ELEMENTS_PER_BLOB as u64),
+            &FR_ONE,
+        );
         blst_fr_mul(&mut res, &res, &tmp);
     }
     Ok(res)
@@ -1220,8 +1219,7 @@ pub fn verify_blob_kzg_proof_batch(
     /* Convert each proof to a g1 point */
     let mut proofs_g1: Vec<_> = (0..n).map(|_| g1_t::default()).collect();
 
-    let mut evaluation_challenges_fr: Vec<_> =
-        (0..n).map(|_| fr_t::default()).collect();
+    let mut evaluation_challenges_fr: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
     let mut ys_fr: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
 
     for i in 0..n {
@@ -1282,9 +1280,7 @@ fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>,
 }
 
 fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, KzgError> {
-    let mut res: Vec<blst_fr> = (0..width + 1)
-        .map(|_| blst_fr::default())
-        .collect();
+    let mut res: Vec<blst_fr> = (0..width + 1).map(|_| blst_fr::default()).collect();
     res[0] = FR_ONE;
     res[1] = *root;
 
