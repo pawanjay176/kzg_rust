@@ -398,15 +398,15 @@ pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, KzgError> {
         .map_err(|e| KzgError::InvalidHexFormat(format!("Failed to decode hex: {}", e)))
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Polynomial {
-    evals: [fr_t; FIELD_ELEMENTS_PER_BLOB],
+    evals: Box<[fr_t; FIELD_ELEMENTS_PER_BLOB]>,
 }
 
 impl Default for Polynomial {
     fn default() -> Self {
         Self {
-            evals: [fr_t::default(); FIELD_ELEMENTS_PER_BLOB],
+            evals: Box::new([fr_t::default(); FIELD_ELEMENTS_PER_BLOB]),
         }
     }
 }
@@ -464,9 +464,9 @@ impl Default for Bytes48 {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Blob {
-    bytes: [u8; BYTES_PER_BLOB],
+    bytes: Box<[u8; BYTES_PER_BLOB]>,
 }
 
 impl Blob {
@@ -480,7 +480,7 @@ impl Blob {
         }
         let mut new_bytes = [0; BYTES_PER_BLOB];
         new_bytes.copy_from_slice(bytes);
-        Ok(Self { bytes: new_bytes })
+        Ok(Self { bytes: Box::new(new_bytes) })
     }
 
     pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
@@ -755,9 +755,7 @@ pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, KzgError> {
 }
 
 fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
-    let mut poly = Polynomial {
-        evals: [Default::default(); FIELD_ELEMENTS_PER_BLOB],
-    };
+    let mut poly = Polynomial::default();
     for i in 0..FIELD_ELEMENTS_PER_BLOB {
         let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
         let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT;
@@ -932,7 +930,7 @@ fn evaluate_polynomial_in_evaluation_form(
 ///////////////////////////////////////////////////////////////////////////////
 
 fn poly_to_kzg_commitment(p: &Polynomial, s: &KzgSettings) -> Result<g1_t, KzgError> {
-    g1_lincomb_fast(&s.g1_values, &p.evals)
+    g1_lincomb_fast(&s.g1_values, &p.evals.as_slice())
 }
 
 pub fn blob_to_kzg_commitment(blob: &Blob, s: &KzgSettings) -> Result<KzgCommitment, KzgError> {
@@ -1031,7 +1029,7 @@ fn compute_kzg_proof_impl(
             }
         }
     }
-    let out_g1 = g1_lincomb_fast(&s.g1_values, &q.evals)?;
+    let out_g1 = g1_lincomb_fast(&s.g1_values, &q.evals.as_slice())?;
 
     let proof = bytes_from_g1(&out_g1);
     Ok((KzgProof(proof), y_out))
@@ -1459,7 +1457,7 @@ impl From<[u8; BYTES_PER_PROOF]> for KzgProof {
 
 impl From<[u8; BYTES_PER_BLOB]> for Blob {
     fn from(value: [u8; BYTES_PER_BLOB]) -> Self {
-        Self { bytes: value }
+        Self { bytes: Box::new(value) }
     }
 }
 
