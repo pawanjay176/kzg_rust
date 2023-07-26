@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::{Blob, KzgCommitment, KzgProof, KzgError as Error};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Input {
