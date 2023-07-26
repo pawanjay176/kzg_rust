@@ -38,12 +38,19 @@ pub struct KzgSettings {
 pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
 pub const BYTES_PER_COMMITMENT: usize = 48;
 pub const BYTES_PER_PROOF: usize = 48;
-pub const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
+
+pub const fn field_elements_per_blob() -> usize {
+    if cfg!(feature = "minimal") {
+        4
+    } else {
+        4096
+    }
+}
 
 pub const CHALLENGE_INPUT_SIZE: usize =
     DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT;
 
-pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
+pub const BYTES_PER_BLOB: usize = field_elements_per_blob() * BYTES_PER_FIELD_ELEMENT;
 
 /// Domain seperator for the Fiat-Shamir protocol.
 const FIAT_SHAMIR_PROTOCOL_DOMAIN: &str = "FSBLOBVERIFY_V1_";
@@ -61,7 +68,7 @@ pub const BYTES_PER_G1: usize = 48;
 pub const BYTES_PER_G2: usize = 96;
 
 /// The number of g1 points in a trusted setup.
-pub const TRUSTED_SETUP_NUM_G1_POINTS: usize = FIELD_ELEMENTS_PER_BLOB;
+pub const TRUSTED_SETUP_NUM_G1_POINTS: usize = field_elements_per_blob();
 
 /// The number of g2 points in a trusted setup.
 pub const TRUSTED_SETUP_NUM_G2_POINTS: usize = 65;
@@ -400,13 +407,13 @@ pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, KzgError> {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Polynomial {
-    evals: Box<[fr_t; FIELD_ELEMENTS_PER_BLOB]>,
+    evals: Box<[fr_t; field_elements_per_blob()]>,
 }
 
 impl Default for Polynomial {
     fn default() -> Self {
         Self {
-            evals: Box::new([fr_t::default(); FIELD_ELEMENTS_PER_BLOB]),
+            evals: Box::new([fr_t::default(); field_elements_per_blob()]),
         }
     }
 }
@@ -480,7 +487,9 @@ impl Blob {
         }
         let mut new_bytes = [0; BYTES_PER_BLOB];
         new_bytes.copy_from_slice(bytes);
-        Ok(Self { bytes: Box::new(new_bytes) })
+        Ok(Self {
+            bytes: Box::new(new_bytes),
+        })
     }
 
     pub fn from_hex(hex_str: &str) -> Result<Self, KzgError> {
@@ -756,7 +765,7 @@ pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, KzgError> {
 
 fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, KzgError> {
     let mut poly = Polynomial::default();
-    for i in 0..FIELD_ELEMENTS_PER_BLOB {
+    for i in 0..field_elements_per_blob() {
         let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
         let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT;
         let field_bytes = Bytes32::from_bytes(&blob.bytes[start_bytes..end_bytes])?;
@@ -781,7 +790,7 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, Kz
         .copy_from_slice(0u64.to_be_bytes().as_slice());
     offset += std::mem::size_of::<u64>();
     bytes[offset..offset + std::mem::size_of::<u64>()]
-        .copy_from_slice(FIELD_ELEMENTS_PER_BLOB.to_be_bytes().as_slice());
+        .copy_from_slice(field_elements_per_blob().to_be_bytes().as_slice());
     offset += std::mem::size_of::<u64>();
 
     /* Copy blob */
@@ -885,9 +894,9 @@ fn evaluate_polynomial_in_evaluation_form(
     x: &fr_t,
     s: &KzgSettings,
 ) -> Result<fr_t, KzgError> {
-    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
+    let mut inverses_in = [fr_t::default(); field_elements_per_blob()];
     let mut tmp = blst_fr::default();
-    for i in 0..FIELD_ELEMENTS_PER_BLOB {
+    for i in 0..field_elements_per_blob() {
         /*
          * If the point to evaluate at is one of the evaluation points by which
          * the polynomial is given, we can just return the result directly.
@@ -906,18 +915,18 @@ fn evaluate_polynomial_in_evaluation_form(
 
     let mut res = FR_ZERO;
     let mut tmp = fr_t::default();
-    for i in 0..FIELD_ELEMENTS_PER_BLOB {
+    for i in 0..field_elements_per_blob() {
         unsafe {
             blst_fr_mul(&mut tmp, &inverses[i], &s.roots_of_unity[i]);
             blst_fr_mul(&mut tmp, &tmp, &p.evals[i]);
             blst_fr_add(&mut res, &res, &tmp);
         }
     }
-    res = fr_div(res, fr_from_u64(FIELD_ELEMENTS_PER_BLOB as u64));
+    res = fr_div(res, fr_from_u64(field_elements_per_blob() as u64));
     unsafe {
         blst_fr_sub(
             &mut tmp,
-            &fr_pow(*x, FIELD_ELEMENTS_PER_BLOB as u64),
+            &fr_pow(*x, field_elements_per_blob() as u64),
             &FR_ONE,
         );
         blst_fr_mul(&mut res, &res, &tmp);
@@ -973,9 +982,9 @@ fn compute_kzg_proof_impl(
 ) -> Result<(KzgProof, fr_t), KzgError> {
     let mut q = Polynomial::default();
     let y_out = evaluate_polynomial_in_evaluation_form(polynomial, z, s)?;
-    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
+    let mut inverses_in = [fr_t::default(); field_elements_per_blob()];
     let mut m = 0usize;
-    for i in 0..FIELD_ELEMENTS_PER_BLOB {
+    for i in 0..field_elements_per_blob() {
         if *z == s.roots_of_unity[i] {
             /* We are asked to compute a KZG proof inside the domain */
             m = i + 1;
@@ -991,7 +1000,7 @@ fn compute_kzg_proof_impl(
 
     let mut inverses = fr_batch_inv(&inverses_in)?;
 
-    for i in 0..FIELD_ELEMENTS_PER_BLOB {
+    for i in 0..field_elements_per_blob() {
         unsafe {
             blst_fr_mul(&mut q.evals[i], &q.evals[i], &inverses[i]);
         }
@@ -1002,7 +1011,7 @@ fn compute_kzg_proof_impl(
     if m != 0 {
         m -= 1;
         q.evals[m] = FR_ZERO;
-        for i in 0..FIELD_ELEMENTS_PER_BLOB {
+        for i in 0..field_elements_per_blob() {
             if i == m {
                 continue;
             }
@@ -1015,7 +1024,7 @@ fn compute_kzg_proof_impl(
 
         inverses = fr_batch_inv(&inverses_in)?;
 
-        for i in 0..FIELD_ELEMENTS_PER_BLOB {
+        for i in 0..field_elements_per_blob() {
             if i == m {
                 continue;
             }
@@ -1111,7 +1120,7 @@ fn compute_r_powers(
     bytes.extend_from_slice(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN.as_bytes());
 
     /* Copy degree of the polynomial */
-    bytes.extend_from_slice(&FIELD_ELEMENTS_PER_BLOB.to_be_bytes());
+    bytes.extend_from_slice(&field_elements_per_blob().to_be_bytes());
 
     /* Copy number of commitments */
     bytes.extend_from_slice(&n.to_be_bytes());
@@ -1457,7 +1466,9 @@ impl From<[u8; BYTES_PER_PROOF]> for KzgProof {
 
 impl From<[u8; BYTES_PER_BLOB]> for Blob {
     fn from(value: [u8; BYTES_PER_BLOB]) -> Self {
-        Self { bytes: Box::new(value) }
+        Self {
+            bytes: Box::new(value),
+        }
     }
 }
 
@@ -1552,17 +1563,22 @@ mod tests {
     const TRUSTED_SETUP: &str = "testing_trusted_setups.json";
     const BLOB_TO_KZG_COMMITMENT_TESTS: &str =
         "../../ethereum/c-kzg-4844/tests/blob_to_kzg_commitment/*/*/*";
-    const COMPUTE_KZG_PROOF_TESTS: &str =
-        "../../ethereum/c-kzg-4844/tests/compute_kzg_proof/*/*/*";
+    const COMPUTE_KZG_PROOF_TESTS: &str = "../../ethereum/c-kzg-4844/tests/compute_kzg_proof/*/*/*";
     const COMPUTE_BLOB_KZG_PROOF_TESTS: &str =
         "../../ethereum/c-kzg-4844/tests/compute_blob_kzg_proof/*/*/*";
-    const VERIFY_KZG_PROOF_TESTS: &str =
-        "../../ethereum/c-kzg-4844/tests/verify_kzg_proof/*/*/*";
+    const VERIFY_KZG_PROOF_TESTS: &str = "../../ethereum/c-kzg-4844/tests/verify_kzg_proof/*/*/*";
     const VERIFY_BLOB_KZG_PROOF_TESTS: &str =
         "../../ethereum/c-kzg-4844/tests/verify_blob_kzg_proof/*/*/*";
     const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str =
         "../../ethereum/c-kzg-4844/tests/verify_blob_kzg_proof_batch/*/*/*";
 
+    #[cfg(feature = "minimal")]
+    #[test]
+    fn test_field_elements() {
+        assert_eq!(field_elements_per_blob(), 4);
+    }
+
+    #[cfg(not(feature = "minimal"))]
     #[test]
     fn test_blob_to_kzg_commitment() {
         let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
@@ -1587,6 +1603,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "minimal"))]
     #[test]
     fn test_compute_kzg_proof() {
         let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
@@ -1614,6 +1631,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "minimal"))]
     #[test]
     fn test_compute_blob_kzg_proof() {
         let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
@@ -1640,6 +1658,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "minimal"))]
     #[test]
     fn test_verify_kzg_proof() {
         let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
@@ -1677,6 +1696,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "minimal"))]
     #[test]
     fn test_verify_blob_kzg_proof() {
         let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
@@ -1710,6 +1730,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "minimal"))]
     #[test]
     fn test_verify_blob_kzg_proof_batch() {
         let kzg_settings = load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();

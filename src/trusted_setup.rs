@@ -1,4 +1,4 @@
-use crate::{BYTES_PER_G1, BYTES_PER_G2, FIELD_ELEMENTS_PER_BLOB};
+use crate::{BYTES_PER_G1, BYTES_PER_G2, field_elements_per_blob};
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 
@@ -148,7 +148,7 @@ where
     // Hence, we truncate the number of G1 points after deserialisation
     // to ensure that we have the right number of g1 points in the
     // trusted setup.
-    decoded.truncate(FIELD_ELEMENTS_PER_BLOB);
+    decoded.truncate(field_elements_per_blob());
     Ok(decoded)
 }
 
