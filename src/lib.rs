@@ -509,6 +509,10 @@ impl KzgCommitment {
     pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Ok(Self(Bytes48::from_bytes(&hex_to_bytes(hex_str)?)?))
     }
+
+    pub fn to_bytes(self) -> [u8; BYTES_PER_COMMITMENT] {
+        self.0.bytes
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -517,6 +521,10 @@ pub struct KzgProof(pub Bytes48);
 impl KzgProof {
     pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Ok(Self(Bytes48::from_bytes(&hex_to_bytes(hex_str)?)?))
+    }
+
+    pub fn to_bytes(self) -> [u8; BYTES_PER_PROOF] {
+        self.0.bytes
     }
 }
 
