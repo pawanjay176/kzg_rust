@@ -5,8 +5,8 @@ mod utils;
 
 use crate::consts::*;
 pub use crate::consts::{
-    field_elements_per_blob, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_FIELD_ELEMENT,
-    BYTES_PER_PROOF,
+    BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_FIELD_ELEMENT, BYTES_PER_PROOF,
+    FIELD_ELEMENTS_PER_BLOB,
 };
 use crate::utils::*;
 
@@ -57,13 +57,13 @@ pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, Error> {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Polynomial {
-    evals: Box<[fr_t; field_elements_per_blob()]>,
+    evals: Box<[fr_t; FIELD_ELEMENTS_PER_BLOB]>,
 }
 
 impl Default for Polynomial {
     fn default() -> Self {
         Self {
-            evals: Box::new([fr_t::default(); field_elements_per_blob()]),
+            evals: Box::new([fr_t::default(); FIELD_ELEMENTS_PER_BLOB]),
         }
     }
 }
@@ -175,7 +175,7 @@ impl KzgProof {
 
 fn blob_to_polynomial(blob: &Blob) -> Result<Polynomial, Error> {
     let mut poly = Polynomial::default();
-    for i in 0..field_elements_per_blob() {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
         let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT;
         let field_bytes = Bytes32::from_bytes(&blob.bytes[start_bytes..end_bytes])?;
@@ -200,7 +200,7 @@ fn compute_challenge(blob: &Blob, commitment_bytes: &Bytes48) -> Result<fr_t, Er
         .copy_from_slice(0u64.to_be_bytes().as_slice());
     offset += std::mem::size_of::<u64>();
     bytes[offset..offset + std::mem::size_of::<u64>()]
-        .copy_from_slice(field_elements_per_blob().to_be_bytes().as_slice());
+        .copy_from_slice(FIELD_ELEMENTS_PER_BLOB.to_be_bytes().as_slice());
     offset += std::mem::size_of::<u64>();
 
     /* Copy blob */
@@ -304,9 +304,9 @@ fn evaluate_polynomial_in_evaluation_form(
     x: &fr_t,
     s: &KzgSettings,
 ) -> Result<fr_t, Error> {
-    let mut inverses_in = [fr_t::default(); field_elements_per_blob()];
+    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut tmp = blst_fr::default();
-    for i in 0..field_elements_per_blob() {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         /*
          * If the point to evaluate at is one of the evaluation points by which
          * the polynomial is given, we can just return the result directly.
@@ -325,18 +325,18 @@ fn evaluate_polynomial_in_evaluation_form(
 
     let mut res = FR_ZERO;
     let mut tmp = fr_t::default();
-    for i in 0..field_elements_per_blob() {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         unsafe {
             blst_fr_mul(&mut tmp, &inverses[i], &s.roots_of_unity[i]);
             blst_fr_mul(&mut tmp, &tmp, &p.evals[i]);
             blst_fr_add(&mut res, &res, &tmp);
         }
     }
-    res = fr_div(res, fr_from_u64(field_elements_per_blob() as u64));
+    res = fr_div(res, fr_from_u64(FIELD_ELEMENTS_PER_BLOB as u64));
     unsafe {
         blst_fr_sub(
             &mut tmp,
-            &fr_pow(*x, field_elements_per_blob() as u64),
+            &fr_pow(*x, FIELD_ELEMENTS_PER_BLOB as u64),
             &FR_ONE,
         );
         blst_fr_mul(&mut res, &res, &tmp);
@@ -392,9 +392,9 @@ fn compute_kzg_proof_impl(
 ) -> Result<(KzgProof, fr_t), Error> {
     let mut q = Polynomial::default();
     let y_out = evaluate_polynomial_in_evaluation_form(polynomial, z, s)?;
-    let mut inverses_in = [fr_t::default(); field_elements_per_blob()];
+    let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut m = 0usize;
-    for i in 0..field_elements_per_blob() {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         if *z == s.roots_of_unity[i] {
             /* We are asked to compute a KZG proof inside the domain */
             m = i + 1;
@@ -410,7 +410,7 @@ fn compute_kzg_proof_impl(
 
     let mut inverses = fr_batch_inv(&inverses_in)?;
 
-    for i in 0..field_elements_per_blob() {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         unsafe {
             blst_fr_mul(&mut q.evals[i], &q.evals[i], &inverses[i]);
         }
@@ -421,7 +421,7 @@ fn compute_kzg_proof_impl(
     if m != 0 {
         m -= 1;
         q.evals[m] = FR_ZERO;
-        for i in 0..field_elements_per_blob() {
+        for i in 0..FIELD_ELEMENTS_PER_BLOB {
             if i == m {
                 continue;
             }
@@ -434,7 +434,7 @@ fn compute_kzg_proof_impl(
 
         inverses = fr_batch_inv(&inverses_in)?;
 
-        for i in 0..field_elements_per_blob() {
+        for i in 0..FIELD_ELEMENTS_PER_BLOB {
             if i == m {
                 continue;
             }
@@ -530,7 +530,7 @@ fn compute_r_powers(
     bytes.extend_from_slice(RANDOM_CHALLENGE_KZG_BATCH_DOMAIN.as_bytes());
 
     /* Copy degree of the polynomial */
-    bytes.extend_from_slice(&field_elements_per_blob().to_be_bytes());
+    bytes.extend_from_slice(&FIELD_ELEMENTS_PER_BLOB.to_be_bytes());
 
     /* Copy number of commitments */
     bytes.extend_from_slice(&n.to_be_bytes());

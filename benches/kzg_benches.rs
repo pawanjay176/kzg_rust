@@ -16,7 +16,7 @@ fn generate_random_blob(rng: &mut ThreadRng) -> Blob {
     rng.fill(&mut arr[..]);
     // Ensure that the blob is canonical by ensuring that
     // each field element contained in the blob is < BLS_MODULUS
-    for i in 0..field_elements_per_blob() {
+    for i in 0..FIELD_ELEMENTS_PER_BLOB {
         arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
     }
     arr.into()
