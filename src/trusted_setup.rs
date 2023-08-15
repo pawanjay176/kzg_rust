@@ -1,4 +1,4 @@
-use crate::{BYTES_PER_G1, BYTES_PER_G2, field_elements_per_blob};
+use crate::{field_elements_per_blob, BYTES_PER_G1, BYTES_PER_G2};
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 
