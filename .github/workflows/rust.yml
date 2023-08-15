@@ -1,0 +1,28 @@
+name: Rust
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Get latest version of stable rust
+        run: rustup update stable
+      - name: Build and Test
+        run: cargo test --all --release --tests
+      - name: Benchmark
+        run: cargo bench
