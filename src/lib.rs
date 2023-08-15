@@ -971,15 +971,15 @@ mod tests {
 
     const TRUSTED_SETUP: &str = "testing_trusted_setups.json";
     const BLOB_TO_KZG_COMMITMENT_TESTS: &str =
-        "../../ethereum/c-kzg-4844/tests/blob_to_kzg_commitment/*/*/*";
-    const COMPUTE_KZG_PROOF_TESTS: &str = "../../ethereum/c-kzg-4844/tests/compute_kzg_proof/*/*/*";
+        "tests/blob_to_kzg_commitment/*/*/*";
+    const COMPUTE_KZG_PROOF_TESTS: &str = "tests/compute_kzg_proof/*/*/*";
     const COMPUTE_BLOB_KZG_PROOF_TESTS: &str =
-        "../../ethereum/c-kzg-4844/tests/compute_blob_kzg_proof/*/*/*";
-    const VERIFY_KZG_PROOF_TESTS: &str = "../../ethereum/c-kzg-4844/tests/verify_kzg_proof/*/*/*";
+        "tests/compute_blob_kzg_proof/*/*/*";
+    const VERIFY_KZG_PROOF_TESTS: &str = "tests/verify_kzg_proof/*/*/*";
     const VERIFY_BLOB_KZG_PROOF_TESTS: &str =
-        "../../ethereum/c-kzg-4844/tests/verify_blob_kzg_proof/*/*/*";
+        "tests/verify_blob_kzg_proof/*/*/*";
     const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str =
-        "../../ethereum/c-kzg-4844/tests/verify_blob_kzg_proof_batch/*/*/*";
+        "tests/verify_blob_kzg_proof_batch/*/*/*";
 
     #[test]
     fn test_blob_to_kzg_commitment() {
