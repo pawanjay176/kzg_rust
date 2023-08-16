@@ -48,6 +48,45 @@ pub struct KzgSettings {
     g2_values: Vec<g2_t>,
 }
 
+impl KzgSettings {
+    /// Initializes a trusted setup from `FIELD_ELEMENTS_PER_BLOB` g1 points
+    /// and 65 g2 points in byte format.
+    pub fn load_trusted_setup(
+        g1_bytes: Vec<[u8; BYTES_PER_G1]>,
+        g2_bytes: Vec<[u8; BYTES_PER_G2]>,
+    ) -> Result<Self, Error> {
+        if g1_bytes.len() != TRUSTED_SETUP_NUM_G1_POINTS {
+            return Err(Error::InvalidTrustedSetup(format!(
+                "Invalid number of g1 points in trusted setup. Expected {} got {}",
+                TRUSTED_SETUP_NUM_G1_POINTS,
+                g1_bytes.len()
+            )));
+        }
+        if g2_bytes.len() != TRUSTED_SETUP_NUM_G2_POINTS {
+            return Err(Error::InvalidTrustedSetup(format!(
+                "Invalid number of g2 points in trusted setup. Expected {} got {}",
+                TRUSTED_SETUP_NUM_G2_POINTS,
+                g2_bytes.len()
+            )));
+        }
+
+        let g1_points = g1_bytes.into_iter().fold(vec![], |mut acc, x| {
+            acc.extend_from_slice(&x);
+            acc
+        });
+        let g2_points = g2_bytes.into_iter().fold(vec![], |mut acc, x| {
+            acc.extend_from_slice(&x);
+            acc
+        });
+        load_trusted_setup(
+            g1_points,
+            g2_points,
+            TRUSTED_SETUP_NUM_G1_POINTS,
+            TRUSTED_SETUP_NUM_G2_POINTS,
+        )
+    }
+}
+
 /// Converts a hex string (with or without the 0x prefix) to bytes.
 pub fn hex_to_bytes(hex_str: &str) -> Result<Vec<u8>, Error> {
     let trimmed_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
@@ -792,7 +831,7 @@ fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), Error> {
     }
 }
 
-pub fn load_trusted_setup(
+fn load_trusted_setup(
     g1_bytes: Vec<u8>,
     g2_bytes: Vec<u8>,
     n1: usize,
@@ -970,16 +1009,12 @@ mod tests {
     use test_formats::*;
 
     const TRUSTED_SETUP: &str = "testing_trusted_setups.json";
-    const BLOB_TO_KZG_COMMITMENT_TESTS: &str =
-        "tests/blob_to_kzg_commitment/*/*/*";
+    const BLOB_TO_KZG_COMMITMENT_TESTS: &str = "tests/blob_to_kzg_commitment/*/*/*";
     const COMPUTE_KZG_PROOF_TESTS: &str = "tests/compute_kzg_proof/*/*/*";
-    const COMPUTE_BLOB_KZG_PROOF_TESTS: &str =
-        "tests/compute_blob_kzg_proof/*/*/*";
+    const COMPUTE_BLOB_KZG_PROOF_TESTS: &str = "tests/compute_blob_kzg_proof/*/*/*";
     const VERIFY_KZG_PROOF_TESTS: &str = "tests/verify_kzg_proof/*/*/*";
-    const VERIFY_BLOB_KZG_PROOF_TESTS: &str =
-        "tests/verify_blob_kzg_proof/*/*/*";
-    const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str =
-        "tests/verify_blob_kzg_proof_batch/*/*/*";
+    const VERIFY_BLOB_KZG_PROOF_TESTS: &str = "tests/verify_blob_kzg_proof/*/*/*";
+    const VERIFY_BLOB_KZG_PROOF_BATCH_TESTS: &str = "tests/verify_blob_kzg_proof_batch/*/*/*";
 
     #[test]
     fn test_blob_to_kzg_commitment() {
