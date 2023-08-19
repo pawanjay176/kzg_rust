@@ -164,11 +164,11 @@ impl Default for Bytes48 {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Blob<const BYTES_PER_BLOB: usize> {
+pub struct BlobGeneric<const BYTES_PER_BLOB: usize> {
     bytes: Box<[u8; BYTES_PER_BLOB]>,
 }
 
-impl<const BYTES_PER_BLOB: usize> Blob<BYTES_PER_BLOB> {
+impl<const BYTES_PER_BLOB: usize> BlobGeneric<BYTES_PER_BLOB> {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != BYTES_PER_BLOB {
             return Err(Error::InvalidBytesLength(format!(
@@ -423,7 +423,7 @@ impl From<[u8; BYTES_PER_PROOF]> for KzgProof {
     }
 }
 
-impl<const BYTES_PER_BLOB: usize> From<[u8; BYTES_PER_BLOB]> for Blob<BYTES_PER_BLOB> {
+impl<const BYTES_PER_BLOB: usize> From<[u8; BYTES_PER_BLOB]> for BlobGeneric<BYTES_PER_BLOB> {
     fn from(value: [u8; BYTES_PER_BLOB]) -> Self {
         Self {
             bytes: Box::new(value),
@@ -459,14 +459,14 @@ impl Deref for Bytes48 {
     }
 }
 
-impl<const BYTES_PER_BLOB: usize> Deref for Blob<BYTES_PER_BLOB> {
+impl<const BYTES_PER_BLOB: usize> Deref for BlobGeneric<BYTES_PER_BLOB> {
     type Target = [u8; BYTES_PER_BLOB];
     fn deref(&self) -> &Self::Target {
         &self.bytes
     }
 }
 
-impl<const BYTES_PER_BLOB: usize> DerefMut for Blob<BYTES_PER_BLOB> {
+impl<const BYTES_PER_BLOB: usize> DerefMut for BlobGeneric<BYTES_PER_BLOB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.bytes
     }
@@ -513,7 +513,7 @@ pub fn load_trusted_setup_from_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLO
 }
 
 fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &Blob<BYTES_PER_BLOB>,
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
 ) -> Result<Polynomial<FIELD_ELEMENTS_PER_BLOB>, Error> {
     let mut poly = Polynomial::default();
     for i in 0..FIELD_ELEMENTS_PER_BLOB {
@@ -528,7 +528,7 @@ fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB
 /// Note: using commitment_bytes instead of g1_t like the c code since
 /// we seem to be doing unnecessary conversions
 fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &Blob<BYTES_PER_BLOB>,
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &Bytes48,
 ) -> Result<fr_t, Error> {
     let challenge_input_size: usize = challenge_input_size::<BYTES_PER_BLOB>();
@@ -635,7 +635,7 @@ fn poly_to_kzg_commitment<const FIELD_ELEMENTS_PER_BLOB: usize>(
 }
 
 fn blob_to_kzg_commitment<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &Blob<BYTES_PER_BLOB>,
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
     s: &KzgSettings,
 ) -> Result<KzgCommitment, Error> {
     let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
@@ -645,7 +645,7 @@ fn blob_to_kzg_commitment<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_
 }
 
 fn compute_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &Blob<BYTES_PER_BLOB>,
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
     z_bytes: &Bytes32,
     s: &KzgSettings,
 ) -> Result<(KzgProof, Bytes32), Error> {
@@ -658,7 +658,7 @@ fn compute_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
 }
 
 fn compute_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &Blob<BYTES_PER_BLOB>,
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &KzgCommitment,
     s: &KzgSettings,
 ) -> Result<KzgProof, Error> {
@@ -777,7 +777,7 @@ fn verify_kzg_proof(
 }
 
 fn verify_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &Blob<BYTES_PER_BLOB>,
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &KzgCommitment,
     proof_bytes: &KzgProof,
     s: &KzgSettings,
@@ -860,7 +860,7 @@ fn verify_blob_kzg_proof_batch<
     const BYTES_PER_BLOB: usize,
     const FIELD_ELEMENTS_PER_BLOB: usize,
 >(
-    blobs: &[Blob<BYTES_PER_BLOB>],
+    blobs: &[BlobGeneric<BYTES_PER_BLOB>],
     commitment_bytes: &[KzgCommitment],
     proof_bytes: &[KzgProof],
     s: &KzgSettings,
@@ -925,97 +925,111 @@ fn verify_blob_kzg_proof_batch<
     Ok(res)
 }
 
-pub struct KzgMainnet;
+macro_rules! impl_kzg_presets {
+    ($module_name:ident, $field_elements_per_blob:ident) => {
+        pub mod $module_name {
+            use super::*;
 
-pub const MAINNET_FIELD_ELEMENTS_PER_BLOB: usize = 4096;
-pub const MAINNET_BYTES_PER_BLOB: usize = MAINNET_FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
-pub type BlobMainnet = Blob<MAINNET_BYTES_PER_BLOB>;
+            pub struct Kzg;
 
-impl KzgMainnet {
-    pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
-        trusted_setup_json_file: P,
-    ) -> Result<KzgSettings, Error> {
-        load_trusted_setup_from_file::<_, MAINNET_FIELD_ELEMENTS_PER_BLOB>(trusted_setup_json_file)
-    }
+            pub const FIELD_ELEMENTS_PER_BLOB: usize = $field_elements_per_blob;
+            pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
+            pub type Blob = BlobGeneric<BYTES_PER_BLOB>;
 
-    pub fn load_trusted_setup(
-        g1_bytes: Vec<[u8; BYTES_PER_G1]>,
-        g2_bytes: Vec<[u8; BYTES_PER_G2]>,
-    ) -> Result<KzgSettings, Error> {
-        KzgSettings::load_trusted_setup(g1_bytes, g2_bytes, MAINNET_FIELD_ELEMENTS_PER_BLOB)
-    }
+            impl Kzg {
+                pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
+                    trusted_setup_json_file: P,
+                ) -> Result<KzgSettings, Error> {
+                    load_trusted_setup_from_file::<_, FIELD_ELEMENTS_PER_BLOB>(
+                        trusted_setup_json_file,
+                    )
+                }
 
-    pub fn blob_to_kzg_commitment(
-        blob: &BlobMainnet,
-        s: &KzgSettings,
-    ) -> Result<KzgCommitment, Error> {
-        blob_to_kzg_commitment::<MAINNET_BYTES_PER_BLOB, MAINNET_FIELD_ELEMENTS_PER_BLOB>(blob, s)
-    }
+                pub fn load_trusted_setup(
+                    g1_bytes: Vec<[u8; BYTES_PER_G1]>,
+                    g2_bytes: Vec<[u8; BYTES_PER_G2]>,
+                ) -> Result<KzgSettings, Error> {
+                    KzgSettings::load_trusted_setup(g1_bytes, g2_bytes, FIELD_ELEMENTS_PER_BLOB)
+                }
 
-    pub fn compute_kzg_proof(
-        blob: &BlobMainnet,
-        z_bytes: &Bytes32,
-        s: &KzgSettings,
-    ) -> Result<(KzgProof, Bytes32), Error> {
-        compute_kzg_proof::<MAINNET_BYTES_PER_BLOB, MAINNET_FIELD_ELEMENTS_PER_BLOB>(
-            blob, z_bytes, s,
-        )
-    }
+                pub fn blob_to_kzg_commitment(
+                    blob: &Blob,
+                    s: &KzgSettings,
+                ) -> Result<KzgCommitment, Error> {
+                    blob_to_kzg_commitment::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, s)
+                }
 
-    pub fn compute_blob_kzg_proof(
-        blob: &BlobMainnet,
-        commitment_bytes: &KzgCommitment,
-        s: &KzgSettings,
-    ) -> Result<KzgProof, Error> {
-        compute_blob_kzg_proof::<MAINNET_BYTES_PER_BLOB, MAINNET_FIELD_ELEMENTS_PER_BLOB>(
-            blob,
-            commitment_bytes,
-            s,
-        )
-    }
+                pub fn compute_kzg_proof(
+                    blob: &Blob,
+                    z_bytes: &Bytes32,
+                    s: &KzgSettings,
+                ) -> Result<(KzgProof, Bytes32), Error> {
+                    compute_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, z_bytes, s)
+                }
 
-    pub fn verify_kzg_proof(
-        commitment_bytes: &KzgCommitment,
-        z_bytes: &Bytes32,
-        y_bytes: &Bytes32,
-        proof_bytes: &KzgProof,
-        s: &KzgSettings,
-    ) -> Result<bool, Error> {
-        verify_kzg_proof(commitment_bytes, z_bytes, y_bytes, proof_bytes, s)
-    }
+                pub fn compute_blob_kzg_proof(
+                    blob: &Blob,
+                    commitment_bytes: &KzgCommitment,
+                    s: &KzgSettings,
+                ) -> Result<KzgProof, Error> {
+                    compute_blob_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
+                        blob,
+                        commitment_bytes,
+                        s,
+                    )
+                }
 
-    pub fn verify_blob_kzg_proof(
-        blob: &BlobMainnet,
-        commitment_bytes: &KzgCommitment,
-        proof_bytes: &KzgProof,
-        s: &KzgSettings,
-    ) -> Result<bool, Error> {
-        verify_blob_kzg_proof::<MAINNET_BYTES_PER_BLOB, MAINNET_FIELD_ELEMENTS_PER_BLOB>(
-            blob,
-            commitment_bytes,
-            proof_bytes,
-            s,
-        )
-    }
+                pub fn verify_kzg_proof(
+                    commitment_bytes: &KzgCommitment,
+                    z_bytes: &Bytes32,
+                    y_bytes: &Bytes32,
+                    proof_bytes: &KzgProof,
+                    s: &KzgSettings,
+                ) -> Result<bool, Error> {
+                    verify_kzg_proof(commitment_bytes, z_bytes, y_bytes, proof_bytes, s)
+                }
 
-    pub fn verify_blob_kzg_proof_batch(
-        blobs: &[BlobMainnet],
-        commitment_bytes: &[KzgCommitment],
-        proof_bytes: &[KzgProof],
-        s: &KzgSettings,
-    ) -> Result<bool, Error> {
-        verify_blob_kzg_proof_batch::<MAINNET_BYTES_PER_BLOB, MAINNET_FIELD_ELEMENTS_PER_BLOB>(
-            blobs,
-            commitment_bytes,
-            proof_bytes,
-            s,
-        )
-    }
+                pub fn verify_blob_kzg_proof(
+                    blob: &Blob,
+                    commitment_bytes: &KzgCommitment,
+                    proof_bytes: &KzgProof,
+                    s: &KzgSettings,
+                ) -> Result<bool, Error> {
+                    verify_blob_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
+                        blob,
+                        commitment_bytes,
+                        proof_bytes,
+                        s,
+                    )
+                }
+
+                pub fn verify_blob_kzg_proof_batch(
+                    blobs: &[Blob],
+                    commitment_bytes: &[KzgCommitment],
+                    proof_bytes: &[KzgProof],
+                    s: &KzgSettings,
+                ) -> Result<bool, Error> {
+                    verify_blob_kzg_proof_batch::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
+                        blobs,
+                        commitment_bytes,
+                        proof_bytes,
+                        s,
+                    )
+                }
+            }
+        }
+    };
 }
+
+
+
+impl_kzg_presets!(kzg_mainnet, FIELD_ELEMENTS_PER_BLOB_MAINNET);
+impl_kzg_presets!(kzg_minimal, FIELD_ELEMENTS_PER_BLOB_MINIMAL);
 
 #[cfg(test)]
 #[cfg(not(feature = "minimal"))]
 mod tests {
+    use super::kzg_mainnet::*;
     use super::*;
     use std::fs;
     use std::path::PathBuf;
@@ -1031,7 +1045,7 @@ mod tests {
 
     #[test]
     fn test_blob_to_kzg_commitment() {
-        let kzg_settings = KzgMainnet::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+        let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(BLOB_TO_KZG_COMMITMENT_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1046,7 +1060,7 @@ mod tests {
                 continue;
             };
 
-            match KzgMainnet::blob_to_kzg_commitment(&blob, &kzg_settings) {
+            match Kzg::blob_to_kzg_commitment(&blob, &kzg_settings) {
                 Ok(res) => assert_eq!(res.0.bytes, test.get_output().unwrap().bytes),
                 _ => assert!(test.get_output().is_none()),
             }
@@ -1055,7 +1069,7 @@ mod tests {
 
     #[test]
     fn test_compute_kzg_proof() {
-        let kzg_settings = KzgMainnet::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+        let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(COMPUTE_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1070,7 +1084,7 @@ mod tests {
                 continue;
             };
 
-            match KzgMainnet::compute_kzg_proof(&blob, &z, &kzg_settings) {
+            match Kzg::compute_kzg_proof(&blob, &z, &kzg_settings) {
                 Ok((proof, y)) => {
                     assert_eq!(proof.0.bytes, test.get_output().unwrap().0.bytes);
                     assert_eq!(y.bytes, test.get_output().unwrap().1.bytes);
@@ -1082,7 +1096,7 @@ mod tests {
 
     #[test]
     fn test_compute_blob_kzg_proof() {
-        let kzg_settings = KzgMainnet::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+        let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(COMPUTE_BLOB_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1098,7 +1112,11 @@ mod tests {
                 continue;
             };
 
-            match KzgMainnet::compute_blob_kzg_proof(&blob, &KzgCommitment(commitment), &kzg_settings) {
+            match Kzg::compute_blob_kzg_proof(
+                &blob,
+                &KzgCommitment(commitment),
+                &kzg_settings,
+            ) {
                 Ok(res) => assert_eq!(res.0.bytes, test.get_output().unwrap().bytes),
 
                 _ => assert!(test.get_output().is_none()),
@@ -1108,7 +1126,7 @@ mod tests {
 
     #[test]
     fn test_verify_kzg_proof() {
-        let kzg_settings = KzgMainnet::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+        let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(VERIFY_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1145,7 +1163,7 @@ mod tests {
 
     #[test]
     fn test_verify_blob_kzg_proof() {
-        let kzg_settings = KzgMainnet::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+        let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(VERIFY_BLOB_KZG_PROOF_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1164,7 +1182,7 @@ mod tests {
                 continue;
             };
 
-            match KzgMainnet::verify_blob_kzg_proof(
+            match Kzg::verify_blob_kzg_proof(
                 &blob,
                 &KzgCommitment(commitment),
                 &KzgProof(proof),
@@ -1178,7 +1196,7 @@ mod tests {
 
     #[test]
     fn test_verify_blob_kzg_proof_batch() {
-        let kzg_settings = KzgMainnet::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+        let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
         let test_files: Vec<PathBuf> = glob::glob(VERIFY_BLOB_KZG_PROOF_BATCH_TESTS)
             .unwrap()
             .map(Result::unwrap)
@@ -1196,7 +1214,12 @@ mod tests {
                 assert!(test.get_output().is_none());
                 continue;
             };
-            match KzgMainnet::verify_blob_kzg_proof_batch(&blobs, &commitments, &proofs, &kzg_settings) {
+            match Kzg::verify_blob_kzg_proof_batch(
+                &blobs,
+                &commitments,
+                &proofs,
+                &kzg_settings,
+            ) {
                 Ok(res) => assert_eq!(res, test.get_output().unwrap()),
 
                 _ => assert!(test.get_output().is_none()),

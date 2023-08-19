@@ -5,6 +5,8 @@ pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
 pub const BYTES_PER_COMMITMENT: usize = 48;
 pub const BYTES_PER_PROOF: usize = 48;
 
+pub const FIELD_ELEMENTS_PER_BLOB_MAINNET: usize = 4096;
+pub const FIELD_ELEMENTS_PER_BLOB_MINIMAL: usize = 4;
 
 pub const fn challenge_input_size<const BYTES_PER_BLOB: usize>() -> usize {
     DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT
