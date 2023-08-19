@@ -29,7 +29,7 @@ pub enum Error {
  * Stores the setup and parameters needed for computing KZG proofs.
  */
 #[derive(Debug, Default)]
-pub struct KzgSettings {
+pub struct KzgSettingsGeneric<const FIELD_ELEMENTS_PER_BLOB: usize> {
     /** The length of `roots_of_unity`, a power of 2. */
     max_width: u64,
     /** Powers of the primitive root of unity determined by
@@ -43,18 +43,17 @@ pub struct KzgSettings {
     g2_values: Vec<g2_t>,
 }
 
-impl KzgSettings {
+impl<const FIELD_ELEMENTS_PER_BLOB: usize> KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB> {
     /// Initializes a trusted setup from `FIELD_ELEMENTS_PER_BLOB` g1 points
     /// and 65 g2 points in byte format.
     pub fn load_trusted_setup(
         g1_bytes: Vec<[u8; BYTES_PER_G1]>,
         g2_bytes: Vec<[u8; BYTES_PER_G2]>,
-        field_elements_per_blob: usize,
     ) -> Result<Self, Error> {
-        if g1_bytes.len() != field_elements_per_blob {
+        if g1_bytes.len() != FIELD_ELEMENTS_PER_BLOB {
             return Err(Error::InvalidTrustedSetup(format!(
                 "Invalid number of g1 points in trusted setup. Expected {} got {}",
-                field_elements_per_blob,
+                FIELD_ELEMENTS_PER_BLOB,
                 g1_bytes.len()
             )));
         }
@@ -77,9 +76,9 @@ impl KzgSettings {
         load_trusted_setup(
             g1_points,
             g2_points,
-            field_elements_per_blob,
+            FIELD_ELEMENTS_PER_BLOB,
             TRUSTED_SETUP_NUM_G2_POINTS,
-            field_elements_per_blob,
+            FIELD_ELEMENTS_PER_BLOB,
         )
     }
 }
@@ -306,7 +305,9 @@ fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, Error> {
     Ok(roots_of_unity_out)
 }
 
-fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), Error> {
+fn is_trusted_setup_in_lagrange_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
+) -> Result<(), Error> {
     /* Trusted setup is too small; we can't work with this */
     if s.g1_values.len() < 2 || s.g2_values.len() < 2 {
         return Err(Error::BadArgs(
@@ -336,14 +337,14 @@ fn is_trusted_setup_in_lagrange_form(s: &KzgSettings) -> Result<(), Error> {
     }
 }
 
-fn load_trusted_setup(
+fn load_trusted_setup<const FIELD_ELEMENTS_PER_BLOB: usize>(
     g1_bytes: Vec<u8>,
     g2_bytes: Vec<u8>,
     n1: usize,
     n2: usize,
     trusted_setup_num_g1_points: usize,
-) -> Result<KzgSettings, Error> {
-    let mut kzg_settings = KzgSettings::default();
+) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
+    let mut kzg_settings = KzgSettingsGeneric::default();
 
     /* Sanity check in case this is called directly */
 
@@ -482,7 +483,7 @@ impl Deref for KzgCommitment {
 
 pub fn load_trusted_setup_from_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLOB: usize>(
     trusted_setup_json_file: P,
-) -> Result<KzgSettings, Error> {
+) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
     let trusted_setup_file = std::fs::File::open(trusted_setup_json_file)
         .map_err(|e| Error::InvalidTrustedSetup(e.to_string()))?;
     let trusted_setup: TrustedSetup<FIELD_ELEMENTS_PER_BLOB> =
@@ -575,7 +576,7 @@ fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
 fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
     p: &Polynomial<FIELD_ELEMENTS_PER_BLOB>,
     x: &fr_t,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<fr_t, Error> {
     let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut tmp = blst_fr::default();
@@ -623,14 +624,14 @@ fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
 
 fn poly_to_kzg_commitment<const FIELD_ELEMENTS_PER_BLOB: usize>(
     p: &Polynomial<FIELD_ELEMENTS_PER_BLOB>,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<g1_t, Error> {
     g1_lincomb_fast(&s.g1_values, p.evals.as_slice())
 }
 
 fn blob_to_kzg_commitment<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<KzgCommitment, Error> {
     let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
     let commitment = poly_to_kzg_commitment(&poly, s)?;
@@ -641,7 +642,7 @@ fn blob_to_kzg_commitment<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_
 fn compute_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     z_bytes: &Bytes32,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<(KzgProof, Bytes32), Error> {
     let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
     let fr_z = bytes_to_bls_field(z_bytes)?;
@@ -654,7 +655,7 @@ fn compute_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
 fn compute_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &KzgCommitment,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<KzgProof, Error> {
     let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
     /* Compute the challenge for the given blob/commitment */
@@ -668,7 +669,7 @@ fn compute_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_
 fn compute_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     polynomial: &Polynomial<FIELD_ELEMENTS_PER_BLOB>,
     z: &fr_t,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<(KzgProof, fr_t), Error> {
     let mut q = Polynomial::<FIELD_ELEMENTS_PER_BLOB>::default();
     let y_out =
@@ -735,12 +736,12 @@ fn compute_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     Ok((KzgProof(proof), y_out))
 }
 
-fn verify_kzg_proof_impl(
+fn verify_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     commitment: &g1_t,
     z: &fr_t,
     y: &fr_t,
     proof: &g1_t,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> bool {
     /* Calculate: X_minus_z */
     let x_g2 = g2_mul(&G2_GENERATOR, z);
@@ -754,12 +755,12 @@ fn verify_kzg_proof_impl(
     pairings_verify(&p_minus_y, &G2_GENERATOR, proof, &x_minus_z)
 }
 
-fn verify_kzg_proof(
+fn verify_kzg_proof<const FIELD_ELEMENTS_PER_BLOB: usize>(
     commitment_bytes: &KzgCommitment,
     z_bytes: &Bytes32,
     y_bytes: &Bytes32,
     proof_bytes: &KzgProof,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<bool, Error> {
     let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
     let z = bytes_to_bls_field(z_bytes)?;
@@ -774,7 +775,7 @@ fn verify_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_B
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &KzgCommitment,
     proof_bytes: &KzgProof,
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<bool, Error> {
     let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
     let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
@@ -804,7 +805,7 @@ fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
     zs_fr: &[fr_t],
     ys_fr: &[fr_t],
     proofs_g1: &[g1_t],
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<bool, Error> {
     let n = commitments_g1.len();
 
@@ -857,7 +858,7 @@ fn verify_blob_kzg_proof_batch<
     blobs: &[BlobGeneric<BYTES_PER_BLOB>],
     commitment_bytes: &[KzgCommitment],
     proof_bytes: &[KzgProof],
-    s: &KzgSettings,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
 ) -> Result<bool, Error> {
     let n = blobs.len();
     if blobs.len() != commitment_bytes.len() || commitment_bytes.len() != proof_bytes.len() {
@@ -929,11 +930,12 @@ macro_rules! impl_kzg_presets {
             pub const FIELD_ELEMENTS_PER_BLOB: usize = $field_elements_per_blob;
             pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
             pub type Blob = BlobGeneric<BYTES_PER_BLOB>;
+            pub type KzgSettings = KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>;
 
             impl Kzg {
                 pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
                     trusted_setup_json_file: P,
-                ) -> Result<KzgSettings, Error> {
+                ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
                     load_trusted_setup_from_file::<_, FIELD_ELEMENTS_PER_BLOB>(
                         trusted_setup_json_file,
                     )
@@ -942,13 +944,16 @@ macro_rules! impl_kzg_presets {
                 pub fn load_trusted_setup(
                     g1_bytes: Vec<[u8; BYTES_PER_G1]>,
                     g2_bytes: Vec<[u8; BYTES_PER_G2]>,
-                ) -> Result<KzgSettings, Error> {
-                    KzgSettings::load_trusted_setup(g1_bytes, g2_bytes, FIELD_ELEMENTS_PER_BLOB)
+                ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
+                    KzgSettingsGeneric::load_trusted_setup(
+                        g1_bytes,
+                        g2_bytes,
+                    )
                 }
 
                 pub fn blob_to_kzg_commitment(
                     blob: &Blob,
-                    s: &KzgSettings,
+                    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
                 ) -> Result<KzgCommitment, Error> {
                     blob_to_kzg_commitment::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, s)
                 }
@@ -956,7 +961,7 @@ macro_rules! impl_kzg_presets {
                 pub fn compute_kzg_proof(
                     blob: &Blob,
                     z_bytes: &Bytes32,
-                    s: &KzgSettings,
+                    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
                 ) -> Result<(KzgProof, Bytes32), Error> {
                     compute_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, z_bytes, s)
                 }
@@ -964,7 +969,7 @@ macro_rules! impl_kzg_presets {
                 pub fn compute_blob_kzg_proof(
                     blob: &Blob,
                     commitment_bytes: &KzgCommitment,
-                    s: &KzgSettings,
+                    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
                 ) -> Result<KzgProof, Error> {
                     compute_blob_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
                         blob,
@@ -978,7 +983,7 @@ macro_rules! impl_kzg_presets {
                     z_bytes: &Bytes32,
                     y_bytes: &Bytes32,
                     proof_bytes: &KzgProof,
-                    s: &KzgSettings,
+                    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
                 ) -> Result<bool, Error> {
                     verify_kzg_proof(commitment_bytes, z_bytes, y_bytes, proof_bytes, s)
                 }
@@ -987,7 +992,7 @@ macro_rules! impl_kzg_presets {
                     blob: &Blob,
                     commitment_bytes: &KzgCommitment,
                     proof_bytes: &KzgProof,
-                    s: &KzgSettings,
+                    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
                 ) -> Result<bool, Error> {
                     verify_blob_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
                         blob,
@@ -1001,7 +1006,7 @@ macro_rules! impl_kzg_presets {
                     blobs: &[Blob],
                     commitment_bytes: &[KzgCommitment],
                     proof_bytes: &[KzgProof],
-                    s: &KzgSettings,
+                    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
                 ) -> Result<bool, Error> {
                     verify_blob_kzg_proof_batch::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
                         blobs,
