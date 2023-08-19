@@ -1,5 +1,5 @@
 use crate::consts::*;
-use crate::{Bytes32, Bytes48, Error};
+use crate::kzg::{Bytes32, Bytes48, Error};
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
 use BLST_ERROR::BLST_SUCCESS;
