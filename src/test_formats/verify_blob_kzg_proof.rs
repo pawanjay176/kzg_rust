@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
+use super::BYTES_PER_BLOB;
 use crate::{Blob, Bytes48, Error};
+
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -11,7 +13,7 @@ pub struct Input<'a> {
 }
 
 impl Input<'_> {
-    pub fn get_blob(&self) -> Result<Blob, Error> {
+    pub fn get_blob(&self) -> Result<Blob<BYTES_PER_BLOB>, Error> {
         Blob::from_hex(self.blob)
     }
 

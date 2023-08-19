@@ -5,16 +5,10 @@ pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
 pub const BYTES_PER_COMMITMENT: usize = 48;
 pub const BYTES_PER_PROOF: usize = 48;
 
-#[cfg(feature = "minimal")]
-pub const FIELD_ELEMENTS_PER_BLOB: usize = 4;
 
-#[cfg(not(feature = "minimal"))]
-pub const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
-
-pub const CHALLENGE_INPUT_SIZE: usize =
-    DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT;
-
-pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
+pub const fn challenge_input_size<const BYTES_PER_BLOB: usize>() -> usize {
+    DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT
+}
 
 /// Domain seperator for the Fiat-Shamir protocol.
 pub const FIAT_SHAMIR_PROTOCOL_DOMAIN: &str = "FSBLOBVERIFY_V1_";
@@ -30,9 +24,6 @@ pub const BYTES_PER_G1: usize = 48;
 
 /// The number of bytes in a g2 point.
 pub const BYTES_PER_G2: usize = 96;
-
-/// The number of g1 points in a trusted setup.
-pub const TRUSTED_SETUP_NUM_G1_POINTS: usize = FIELD_ELEMENTS_PER_BLOB;
 
 /// The number of g2 points in a trusted setup.
 pub const TRUSTED_SETUP_NUM_G2_POINTS: usize = 65;

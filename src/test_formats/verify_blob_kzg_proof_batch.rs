@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use super::BYTES_PER_BLOB;
 use crate::{Blob, Error, KzgCommitment, KzgProof};
 use serde::Deserialize;
 
@@ -11,8 +12,8 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn get_blobs(&self) -> Result<Vec<Blob>, Error> {
-        let mut v: Vec<Blob> = Vec::new();
+    pub fn get_blobs(&self) -> Result<Vec<Blob<BYTES_PER_BLOB>>, Error> {
+        let mut v: Vec<Blob<BYTES_PER_BLOB>> = Vec::new();
         for blob in &self.blobs {
             v.push(Blob::from_hex(blob)?);
         }
