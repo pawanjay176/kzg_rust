@@ -1,7 +1,7 @@
 mod consts;
 mod kzg;
 mod test_formats;
-pub mod trusted_setup;
+mod trusted_setup;
 mod utils;
 
 pub use consts::{

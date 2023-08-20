@@ -18,7 +18,7 @@ struct G2Point([u8; BYTES_PER_G2]);
 ///
 /// See https://github.com/ethereum/consensus-specs/blob/dev/presets/mainnet/trusted_setups/testing_trusted_setups.json
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TrustedSetup<const FIELD_ELEMENTS_PER_BLOB: usize> {
+pub struct TrustedSetupGeneric<const FIELD_ELEMENTS_PER_BLOB: usize> {
     #[serde(rename = "setup_G1_lagrange")]
     #[serde(deserialize_with = "deserialize_g1_points::<__D, FIELD_ELEMENTS_PER_BLOB>")]
     g1_points: Vec<G1Point>,
@@ -26,7 +26,7 @@ pub struct TrustedSetup<const FIELD_ELEMENTS_PER_BLOB: usize> {
     g2_points: Vec<G2Point>,
 }
 
-impl<const FIELD_ELEMENTS_PER_BLOB: usize> TrustedSetup<FIELD_ELEMENTS_PER_BLOB> {
+impl<const FIELD_ELEMENTS_PER_BLOB: usize> TrustedSetupGeneric<FIELD_ELEMENTS_PER_BLOB> {
     pub fn g1_points(&self) -> Vec<[u8; BYTES_PER_G1]> {
         self.g1_points.iter().map(|p| p.0).collect()
     }

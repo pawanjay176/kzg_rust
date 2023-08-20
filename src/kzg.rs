@@ -1,5 +1,5 @@
 use crate::consts::*;
-use crate::trusted_setup::TrustedSetup;
+use crate::trusted_setup::TrustedSetupGeneric;
 use crate::utils::*;
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
@@ -486,7 +486,7 @@ pub fn load_trusted_setup_from_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLO
 ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
     let trusted_setup_file = std::fs::File::open(trusted_setup_json_file)
         .map_err(|e| Error::InvalidTrustedSetup(e.to_string()))?;
-    let trusted_setup: TrustedSetup<FIELD_ELEMENTS_PER_BLOB> =
+    let trusted_setup: TrustedSetupGeneric<FIELD_ELEMENTS_PER_BLOB> =
         serde_json::from_reader(&trusted_setup_file).unwrap();
     let n1 = trusted_setup.g1_len();
     let n2 = trusted_setup.g2_len();
@@ -931,6 +931,7 @@ macro_rules! impl_kzg_presets {
             pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
             pub type Blob = BlobGeneric<BYTES_PER_BLOB>;
             pub type KzgSettings = KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>;
+            pub type TrustedSetup = TrustedSetupGeneric<FIELD_ELEMENTS_PER_BLOB>;
 
             impl Kzg {
                 pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
