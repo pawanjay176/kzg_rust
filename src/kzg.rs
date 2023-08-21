@@ -1,6 +1,7 @@
 use crate::consts::*;
 use crate::trusted_setup::TrustedSetupGeneric;
 use crate::utils::*;
+use arbitrary::Arbitrary;
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
 use std::path::Path;
@@ -103,7 +104,7 @@ impl<const FIELD_ELEMENTS_PER_BLOB: usize> Default for Polynomial<FIELD_ELEMENTS
     }
 }
 
-#[derive(Default, Debug, Copy, Clone, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Arbitrary)]
 pub struct Bytes32 {
     pub(crate) bytes: [u8; 32],
 }
@@ -126,7 +127,7 @@ impl Bytes32 {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Arbitrary)]
 pub struct Bytes48 {
     pub(crate) bytes: [u8; 48],
 }
@@ -161,6 +162,16 @@ pub struct BlobGeneric<const BYTES_PER_BLOB: usize> {
     bytes: Box<[u8; BYTES_PER_BLOB]>,
 }
 
+impl<const BYTES_PER_BLOB: usize> Arbitrary<'_> for BlobGeneric<BYTES_PER_BLOB> {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
+        let mut blob = BlobGeneric {
+            bytes: Box::new([0; BYTES_PER_BLOB]),
+        };
+        u.fill_buffer(&mut blob.bytes[1..])?; // Fill the remaining bytes with random data.
+        Ok(blob)
+    }
+}
+
 impl<const BYTES_PER_BLOB: usize> BlobGeneric<BYTES_PER_BLOB> {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != BYTES_PER_BLOB {
@@ -180,9 +191,13 @@ impl<const BYTES_PER_BLOB: usize> BlobGeneric<BYTES_PER_BLOB> {
     pub fn from_hex(hex_str: &str) -> Result<Self, Error> {
         Self::from_bytes(&hex_to_bytes(hex_str)?)
     }
+
+    pub fn to_bytes(self) -> Box<[u8; BYTES_PER_BLOB]> {
+        self.bytes
+    }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Arbitrary)]
 pub struct KzgCommitment(pub Bytes48);
 
 impl KzgCommitment {
@@ -195,7 +210,7 @@ impl KzgCommitment {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Arbitrary)]
 pub struct KzgProof(pub Bytes48);
 
 impl KzgProof {
@@ -946,10 +961,7 @@ macro_rules! impl_kzg_presets {
                     g1_bytes: Vec<[u8; BYTES_PER_G1]>,
                     g2_bytes: Vec<[u8; BYTES_PER_G2]>,
                 ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
-                    KzgSettingsGeneric::load_trusted_setup(
-                        g1_bytes,
-                        g2_bytes,
-                    )
+                    KzgSettingsGeneric::load_trusted_setup(g1_bytes, g2_bytes)
                 }
 
                 pub fn blob_to_kzg_commitment(

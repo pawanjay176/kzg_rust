@@ -1,6 +1,7 @@
 #![no_main]
 
 use kzg_rust::kzg_mainnet::*;
+use kzg_rust::MainnetFuzzTarget;
 use libfuzzer_sys::fuzz_target;
 
 use lazy_static::lazy_static;
@@ -16,57 +17,34 @@ lazy_static! {
             .unwrap();
 }
 
-fuzz_target!(|data: &[u8]| {
-    if data.len() != BYTES_PER_BLOB {
-        return;
-    }
+fuzz_target!(|data: MainnetFuzzTarget| {
+    let MainnetFuzzTarget {
+        blob: rust_blob,
+        commitment: rust_commitment,
+        proof: rust_proof,
+    } = data;
+    let ckzg_blob = c_kzg::Blob::from_bytes(&*rust_blob.clone().to_bytes()).unwrap();
+    let ckzg_commitment =
+        c_kzg::Bytes48::from_bytes(rust_commitment.clone().to_bytes().as_slice()).unwrap();
+    let ckzg_proof = c_kzg::Bytes48::from_bytes(rust_proof.clone().to_bytes().as_slice()).unwrap();
+    // verify_blob_kzg_proof
+    let ckzg_result = c_kzg::KzgProof::verify_blob_kzg_proof(
+        ckzg_blob.clone(),
+        ckzg_commitment,
+        ckzg_proof,
+        &*TRUSTED_SETUP_CKZG,
+    );
 
-    if let Ok(ckzg_blob) = c_kzg::Blob::from_bytes(data) {
-        let rustkzg_blob = Blob::from_bytes(data).unwrap();
+    let rust_result = Kzg::verify_blob_kzg_proof(
+        &rust_blob,
+        &rust_commitment,
+        &rust_proof,
+        &&*TRUSTED_SETUP_RUST,
+    );
 
-        // blob_to_kzg_commitment
-        let ckzg_commitment =
-            c_kzg::KzgCommitment::blob_to_kzg_commitment(ckzg_blob.clone(), &*TRUSTED_SETUP_CKZG)
-                .unwrap();
-        let rustkzg_commitment =
-            Kzg::blob_to_kzg_commitment(&rustkzg_blob, &*TRUSTED_SETUP_RUST).unwrap();
-
-        assert_eq!(
-            ckzg_commitment.to_bytes().into_inner(),
-            rustkzg_commitment.to_bytes()
-        );
-
-        // compute_blob_kzg_proof
-        let ckzg_proof = c_kzg::KzgProof::compute_blob_kzg_proof(
-            ckzg_blob.clone(),
-            ckzg_commitment.to_bytes(),
-            &*TRUSTED_SETUP_CKZG,
-        )
-        .unwrap();
-
-        let rust_proof =
-            Kzg::compute_blob_kzg_proof(&rustkzg_blob, &rustkzg_commitment, &*TRUSTED_SETUP_RUST)
-                .unwrap();
-
-        assert_eq!(ckzg_proof.to_bytes().into_inner(), rust_proof.to_bytes());
-
-        // verify_blob_kzg_proof
-        let ckzg_verify = c_kzg::KzgProof::verify_blob_kzg_proof(
-            ckzg_blob.clone(),
-            ckzg_commitment.to_bytes(),
-            ckzg_proof.to_bytes(),
-            &*TRUSTED_SETUP_CKZG,
-        )
-        .unwrap();
-
-        let rust_verify = Kzg::verify_blob_kzg_proof(
-            &rustkzg_blob,
-            &rustkzg_commitment,
-            &rust_proof,
-            &*TRUSTED_SETUP_RUST,
-        )
-        .unwrap();
-
-        assert_eq!(rust_verify, ckzg_verify);
+    if ckzg_result.is_err() {
+        assert!(rust_result.is_err());
+    } else {
+        assert_eq!(rust_result.unwrap(), ckzg_result.unwrap());
     }
 });
