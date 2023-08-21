@@ -1,0 +1,43 @@
+[package]
+name = "kzg-rust-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+c-kzg = { git = "https://github.com/ethereum/c-kzg-4844" }
+lazy_static = "1.4.0"
+serde_json = "1.0.105"
+
+[dependencies.kzg_rust]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+
+[[bin]]
+name = "blob_to_kzg_commitment"
+path = "fuzz_targets/blob_to_kzg_commitment.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "compute_blob_kzg_proof"
+path = "fuzz_targets/compute_blob_kzg_proof.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "verify_blob_kzg_proof"
+path = "fuzz_targets/verify_blob_kzg_proof.rs"
+test = false
+doc = false
