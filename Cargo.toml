@@ -20,6 +20,3 @@ rand = "0.8.5"
 [[bench]]
 name = "kzg_benches"
 harness = false
-
-[features]
-minimal = []

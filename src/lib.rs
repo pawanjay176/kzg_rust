@@ -12,7 +12,6 @@ pub use kzg::{kzg_mainnet, kzg_minimal, Bytes32, Bytes48, Error, KzgCommitment, 
 pub(crate) use kzg::BlobGeneric;
 
 #[cfg(test)]
-#[cfg(not(feature = "minimal"))]
 mod tests {
     use super::kzg_mainnet::*;
     use super::*;

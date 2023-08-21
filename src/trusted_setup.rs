@@ -140,8 +140,8 @@ where
     D: Deserializer<'de>,
 {
     let mut decoded: Vec<G1Point> = serde::de::Deserialize::deserialize(deserializer)?;
-    // FIELD_ELEMENTS_PER_BLOB is a compile time parameter that
-    // depends on whether lighthouse is compiled with minimal or mainnet features.
+    // FIELD_ELEMENTS_PER_BLOB is generic const which decides if the kzg operations
+    // are for minimal or mainnet spec requirements.
     // Minimal and mainnet trusted setup parameters differ only by the
     // number of G1 points they contain.
     //
