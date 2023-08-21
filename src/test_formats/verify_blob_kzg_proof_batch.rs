@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::{Blob, Error, KzgCommitment, KzgProof};
+use crate::{kzg_mainnet::Blob, BlobGeneric, Error, KzgCommitment, KzgProof};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -14,7 +14,7 @@ impl Input {
     pub fn get_blobs(&self) -> Result<Vec<Blob>, Error> {
         let mut v: Vec<Blob> = Vec::new();
         for blob in &self.blobs {
-            v.push(Blob::from_hex(blob)?);
+            v.push(BlobGeneric::from_hex(blob)?);
         }
         Ok(v)
     }

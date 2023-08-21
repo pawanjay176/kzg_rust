@@ -1,4 +1,4 @@
-use crate::{BYTES_PER_G1, BYTES_PER_G2, FIELD_ELEMENTS_PER_BLOB};
+use crate::{BYTES_PER_G1, BYTES_PER_G2};
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 
@@ -18,15 +18,15 @@ struct G2Point([u8; BYTES_PER_G2]);
 ///
 /// See https://github.com/ethereum/consensus-specs/blob/dev/presets/mainnet/trusted_setups/testing_trusted_setups.json
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TrustedSetup {
+pub struct TrustedSetupGeneric<const FIELD_ELEMENTS_PER_BLOB: usize> {
     #[serde(rename = "setup_G1_lagrange")]
-    #[serde(deserialize_with = "deserialize_g1_points")]
+    #[serde(deserialize_with = "deserialize_g1_points::<__D, FIELD_ELEMENTS_PER_BLOB>")]
     g1_points: Vec<G1Point>,
     #[serde(rename = "setup_G2")]
     g2_points: Vec<G2Point>,
 }
 
-impl TrustedSetup {
+impl<const FIELD_ELEMENTS_PER_BLOB: usize> TrustedSetupGeneric<FIELD_ELEMENTS_PER_BLOB> {
     pub fn g1_points(&self) -> Vec<[u8; BYTES_PER_G1]> {
         self.g1_points.iter().map(|p| p.0).collect()
     }
@@ -135,7 +135,7 @@ impl<'de> Deserialize<'de> for G2Point {
     }
 }
 
-fn deserialize_g1_points<'de, D>(deserializer: D) -> Result<Vec<G1Point>, D::Error>
+fn deserialize_g1_points<'de, D, const FIELD_ELEMENTS_PER_BLOB: usize>(deserializer: D) -> Result<Vec<G1Point>, D::Error>
 where
     D: Deserializer<'de>,
 {
