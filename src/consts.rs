@@ -1,13 +1,19 @@
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
 
+/// The number of bytes in a BLS scalar field element.
 pub const BYTES_PER_FIELD_ELEMENT: usize = 32;
+
+/// The number of bytes in a KZG commitment.
 pub const BYTES_PER_COMMITMENT: usize = 48;
+
+/// The number of bytes in a KZG proof.
 pub const BYTES_PER_PROOF: usize = 48;
 
 pub const FIELD_ELEMENTS_PER_BLOB_MAINNET: usize = 4096;
 pub const FIELD_ELEMENTS_PER_BLOB_MINIMAL: usize = 4;
 
+/// Input size to the Fiat-Shamir challenge computation.
 pub const fn challenge_input_size<const BYTES_PER_BLOB: usize>() -> usize {
     DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT
 }
@@ -147,6 +153,29 @@ pub const G2_GENERATOR: g2_t = g2_t {
     },
 };
 
+/// The first 32 roots of unity in the finite field `F_r`.
+/// SCALE2_ROOT_OF_UNITY[i] is a 2^i'th root of unity.
+///
+/// For element `{A, B, C, D}`, the field element value is
+/// `A + B * 2^64 + C * 2^128 + D * 2^192`. This format may be converted to
+/// an `fr_t` type via the blst_fr_from_uint64() function.
+///
+/// The decimal values may be calculated with the following Python code:
+/// ```python
+/// MODULUS = 52435875175126190479447740508185965837690552500527637822603658699938581184513
+/// PRIMITIVE_ROOT = 7
+/// [pow(PRIMITIVE_ROOT, (MODULUS - 1) // (2**i), MODULUS) for i in range(32)]
+/// ```
+///
+/// Note: Being a "primitive root" in this context means that `r^k != 1` for any
+/// `k < q-1` where q is the modulus. So powers of r generate the field. This is
+/// also known as being a "primitive element".
+///
+/// In the formula above, the restriction can be slightly relaxed to `r` being a non-square.
+/// This is easy to check: We just require that r^((q-1)/2) == -1. Instead of
+/// 5, we could use 7, 10, 13, 14, 15, 20... to create the 2^i'th roots of unity below.
+/// Generally, there are a lot of primitive roots:
+/// https://crypto.stanford.edu/pbc/notes/numbertheory/gen.html
 pub const SCALE2_ROOT_OF_UNITY: [[u64; 4]; 32] = [
     [
         0x0000000000000001,
