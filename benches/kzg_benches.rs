@@ -3,7 +3,7 @@ use kzg_rust::*;
 use kzg_mainnet::*;
 use rand::{rngs::ThreadRng, Rng};
 
-const TRUSTED_SETUP: &str = "testing_trusted_setups.json";
+const TRUSTED_SETUP: &str = "trusted_setup.txt";
 
 fn generate_random_field_element(rng: &mut ThreadRng) -> Bytes32 {
     let mut arr = [0u8; BYTES_PER_FIELD_ELEMENT];
@@ -26,7 +26,7 @@ fn generate_random_blob(rng: &mut ThreadRng) -> Blob {
 pub fn criterion_benchmark(c: &mut Criterion) {
     let max_count: usize = 64;
     let mut rng = rand::thread_rng();
-    let kzg_settings = Kzg::load_trusted_setup_from_file(TRUSTED_SETUP).unwrap();
+    let kzg_settings = Kzg::load_trusted_setup_file(TRUSTED_SETUP).unwrap();
 
     let blobs: Vec<Blob> = (0..max_count)
         .map(|_| generate_random_blob(&mut rng))

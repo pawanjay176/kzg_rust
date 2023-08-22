@@ -6,14 +6,23 @@ use BLST_ERROR::BLST_SUCCESS;
 
 /* Helper Functions */
 
+/// Test whether the operand is one in the finite field.
+///
+/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
 pub(crate) fn fr_is_one(p: &fr_t) -> bool {
     *p == FR_ONE
 }
 
+/// Test whether the operand is zero in the finite field.
+///
+/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
 pub(crate) fn fr_is_zero(p: &fr_t) -> bool {
     *p == FR_ZERO
 }
 
+/// Divide a field element by another.
+///
+/// NOTE: The behaviour for `b == 0` is unspecified.
 pub(crate) fn fr_div(a: fr_t, b: fr_t) -> fr_t {
     let mut tmp = blst_fr::default();
     let mut res = blst_fr::default();
@@ -24,6 +33,11 @@ pub(crate) fn fr_div(a: fr_t, b: fr_t) -> fr_t {
     }
 }
 
+/// Exponentiation of a field element `a` to `n`.
+///
+/// Uses square and multiply for `log(n)` performance.
+///
+/// NOTE: A 64-bit exponent is sufficient for our needs here.
 pub(crate) fn fr_pow(a: fr_t, mut n: u64) -> fr_t {
     let mut tmp = a;
     let mut res = FR_ONE;
@@ -44,7 +58,11 @@ pub(crate) fn fr_pow(a: fr_t, mut n: u64) -> fr_t {
     }
 }
 
-pub(crate) fn fr_from_u64(n: u64) -> fr_t {
+/// Create a field element from a single 64-bit unsigned integer.
+///
+/// This can only generate a tiny fraction of possible field elements,
+/// and is mostly useful for testing.
+pub(crate) fn fr_from_uint64(n: u64) -> fr_t {
     let vals = [n, 0, 0, 0];
     let mut res = blst_fr::default();
     unsafe {
@@ -53,6 +71,10 @@ pub(crate) fn fr_from_u64(n: u64) -> fr_t {
     }
 }
 
+/// Montgomery batch inversion in finite field.
+///
+/// This function only supports non zero lengths of `a`.
+/// Note: Returns `Error::BadArgs` if zero is found in the input slice.
 pub(crate) fn fr_batch_inv(a: &[fr_t]) -> Result<Vec<fr_t>, Error> {
     if a.is_empty() {
         return Err(Error::BadArgs("fr_batch_inv input is empty".to_string()));
@@ -84,6 +106,7 @@ pub(crate) fn fr_batch_inv(a: &[fr_t]) -> Result<Vec<fr_t>, Error> {
     Ok(res)
 }
 
+/// Multiply a G1 group element by a field element.
 pub(crate) fn g1_mul(a: &g1_t, b: &fr_t) -> g1_t {
     let mut s = blst_scalar::default();
     let mut res = g1_t::default();
@@ -100,6 +123,7 @@ pub(crate) fn g1_mul(a: &g1_t, b: &fr_t) -> g1_t {
     }
 }
 
+/// Multiply a G2 group element by a field element.
 pub(crate) fn g2_mul(a: &g2_t, b: &fr_t) -> g2_t {
     let mut s = blst_scalar::default();
     let mut res = g2_t::default();
@@ -116,6 +140,9 @@ pub(crate) fn g2_mul(a: &g2_t, b: &fr_t) -> g2_t {
     }
 }
 
+/// Subtraction of G1 group elements.
+///
+/// Returns `a - b`
 pub(crate) fn g1_sub(a: &g1_t, b: &g1_t) -> g1_t {
     let mut b_neg = *b;
     let mut res = g1_t::default();
@@ -126,6 +153,9 @@ pub(crate) fn g1_sub(a: &g1_t, b: &g1_t) -> g1_t {
     res
 }
 
+/// Subtraction of G2 group elements.
+///
+/// Returns `a - b`
 pub(crate) fn g2_sub(a: &g2_t, b: &g2_t) -> g2_t {
     let mut b_neg = *b;
     let mut res = g2_t::default();
@@ -136,6 +166,10 @@ pub(crate) fn g2_sub(a: &g2_t, b: &g2_t) -> g2_t {
     res
 }
 
+/// Perform pairings and test whether the outcomes are equal in `G_T`.
+///
+/// Tests whether `e(a1, a2) == e(b1, b2)`.
+///
 pub(crate) fn pairings_verify(a1: &g1_t, a2: &g2_t, b1: &g1_t, b2: &g2_t) -> bool {
     let (mut loop0, mut loop1, mut gt_point) = Default::default();
     let (mut aa1, mut bb1) = Default::default();
@@ -167,6 +201,7 @@ pub(crate) fn pairings_verify(a1: &g1_t, a2: &g2_t, b1: &g1_t, b2: &g2_t) -> boo
 // Bytes Conversion Helper Functions
 ///////////////////////////////////////////////////////////////////////////////
 
+/// Serialize a G1 group element into bytes.
 pub(crate) fn bytes_from_g1(g1_point: &g1_t) -> Bytes48 {
     let mut bytes = Bytes48::default();
     unsafe {
@@ -175,6 +210,7 @@ pub(crate) fn bytes_from_g1(g1_point: &g1_t) -> Bytes48 {
     bytes
 }
 
+/// Serialize a BLS field element into bytes.
 pub fn bytes_from_bls_field(field_element: &fr_t) -> Bytes32 {
     let mut s = blst_scalar::default();
     let mut res = Bytes32::default();
@@ -185,10 +221,16 @@ pub fn bytes_from_bls_field(field_element: &fr_t) -> Bytes32 {
     res
 }
 
+/// Serialize a 64-bit unsigned integer into big endian bytes.
+pub(crate) fn bytes_from_uint64(n: u64) -> [u8; 8] {
+    n.to_be_bytes()
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BLS12-381 Helper Functions
 ///////////////////////////////////////////////////////////////////////////////
 
+/// Map bytes to a BLS field element.
 pub(crate) fn hash_to_bls_field(b: &Bytes32) -> fr_t {
     let mut tmp = blst_scalar::default();
     let mut res = fr_t::default();
@@ -199,6 +241,8 @@ pub(crate) fn hash_to_bls_field(b: &Bytes32) -> fr_t {
     res
 }
 
+/// Convert untrusted bytes to a trusted and validated BLS scalar field
+/// element.
 pub(crate) fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
     let mut tmp = blst_scalar::default();
     let mut res = fr_t::default();
@@ -214,6 +258,11 @@ pub(crate) fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
     }
 }
 
+/// Perform BLS validation required by the types `KZGProof` and `KZGCommitment`.
+/// 
+/// Note: This function deviates from the spec because it returns (via an
+/// output argument) the g1 point. This way is more efficient (faster)
+/// but the function name is a bit misleading.
 pub(crate) fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, Error> {
     let mut p1_affine = blst_p1_affine::default();
     let mut res = g1_t::default();
@@ -244,14 +293,23 @@ pub(crate) fn validate_kzg_g1(b: &Bytes48) -> Result<g1_t, Error> {
     Ok(res)
 }
 
+/// Convert untrusted bytes into a trusted and validated KZGCommitment.
 pub fn bytes_to_kzg_commitment(b: &Bytes48) -> Result<g1_t, Error> {
     validate_kzg_g1(b)
 }
 
-pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
+/// Convert untrusted bytes into a trusted and validated KZGProof.
+ pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
     validate_kzg_g1(b)
 }
 
+/// Calculate a linear combination of G1 group elements.
+///
+/// Calculates `[coeffs_0]p_0 + [coeffs_1]p_1 + ... + [coeffs_n]p_n`
+/// where `n` is `len - 1`.
+///
+/// This function computes the result naively without using Pippenger's
+/// algorithm.
 pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
     assert_eq!(p.len(), coeffs.len());
     let len = p.len();
@@ -265,6 +323,29 @@ pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
     res
 }
 
+///  Calculate a linear combination of G1 group elements.
+/// 
+///  Calculates `[coeffs_0]p_0 + [coeffs_1]p_1 + ... + [coeffs_n]p_n`
+///  where `n` is `len - 1`.
+/// 
+///  NOTE: This function **MUST NOT** be called with the point at infinity in `p`.
+/// 
+///  While this function is significantly faster than
+///  `g1_lincomb_naive()`, we refrain from using it in security-critical places
+///  (like verification) because the blst Pippenger code has not been
+///  audited. In those critical places, we prefer using `g1_lincomb_naive()` which
+///  is much simpler.
+/// 
+///  For the benefit of future generations (since Blst has no documentation to
+///  speak of), there are two ways to pass the arrays of scalars and points
+///  into blst_p1s_mult_pippenger().
+/// 
+///  1. Pass `points` as an array of pointers to the points, and pass
+///     `scalars` as an array of pointers to the scalars, each of length p.len().
+///  2. Pass an array where the first element is a pointer to the contiguous
+///     array of points and the second is null, and similarly for scalars.
+/// 
+///  We do the second of these to save memory here.
 pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
     let len = p.len();
     if len < 8 {
@@ -306,6 +387,7 @@ pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error
     Ok(res)
 }
 
+/// Compute and return [ x^0, x^1, ..., x^{n-1} ].
 pub(crate) fn compute_powers(x: &fr_t, n: usize) -> Vec<fr_t> {
     let mut current_power = FR_ONE;
     let mut res = Vec::with_capacity(n);
@@ -318,6 +400,7 @@ pub(crate) fn compute_powers(x: &fr_t, n: usize) -> Vec<fr_t> {
     res
 }
 
+/// Compute random linear combination challenge scalars for batch verification.
 pub(crate) fn compute_r_powers<const FIELD_ELEMENTS_PER_BLOB: usize>(
     commitments_g1: &[g1_t],
     zs_fr: &[fr_t],

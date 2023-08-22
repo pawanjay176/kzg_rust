@@ -3,6 +3,7 @@ use crate::trusted_setup::TrustedSetupGeneric;
 use crate::utils::*;
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
+use std::fs::File;
 use std::path::Path;
 
 use BLST_ERROR::BLST_SUCCESS;
@@ -78,7 +79,6 @@ impl<const FIELD_ELEMENTS_PER_BLOB: usize> KzgSettingsGeneric<FIELD_ELEMENTS_PER
             g2_points,
             FIELD_ELEMENTS_PER_BLOB,
             TRUSTED_SETUP_NUM_G2_POINTS,
-            FIELD_ELEMENTS_PER_BLOB,
         )
     }
 }
@@ -208,147 +208,17 @@ impl KzgProof {
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Trusted Setup Functions
-///////////////////////////////////////////////////////////////////////////////
-
-fn reverse_bits(mut n: u32, order: u32) -> u32 {
-    assert!(order.is_power_of_two());
-    let order = order.ilog2();
-    let mut result = 0;
-    for _ in 0..order {
-        result <<= 1;
-        result |= n & 1;
-        n >>= 1;
-    }
-    result
-}
-
-/// NOTE: Not swapping in place like the c code, returns a new vector
-fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>, Error> {
-    if values.is_empty() || n >> 32 != 0 || !n.is_power_of_two() || n.ilog2() == 0 {
-        return Err(Error::BadArgs(
-            "bit_reversal_permutation invalid args".to_string(),
-        ));
-    }
-
-    let mut res = Vec::with_capacity(n);
-    for i in 0..n {
-        let bit_reversed_i = reverse_bits(i as u32, n as u32);
-        res.push(values[bit_reversed_i as usize]);
-    }
-
-    Ok(res)
-}
-
-fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, Error> {
-    let mut res: Vec<blst_fr> = (0..width + 1).map(|_| blst_fr::default()).collect();
-    res[0] = FR_ONE;
-    res[1] = *root;
-
-    let mut i = 2usize;
-    let mut tmp = blst_fr::default();
-
-    while !fr_is_one(&res[i - 1]) {
-        if i > width as usize {
-            return Err(Error::BadArgs("expand_root_of_unity i > width".to_string()));
-        }
-        unsafe {
-            blst_fr_mul(&mut tmp, &res[i - 1], root);
-        }
-        res[i] = tmp;
-        i += 1;
-    }
-
-    if !fr_is_one(&res[width as usize]) {
-        return Err(Error::BadArgs(
-            "expand_root_of_unity assertion failed".to_string(),
-        ));
-    }
-    Ok(res)
-}
-
-fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, Error> {
-    /* Calculate the max width */
-    let max_width = 1 << max_scale;
-
-    /* Get the root of unity */
-    if max_scale >= SCALE2_ROOT_OF_UNITY.len() as u32 {
-        return Err(Error::BadArgs(
-            "compute_roots_of_unity max_scale too large".to_string(),
-        ));
-    }
-
-    let mut root_of_unity = fr_t::default();
-    unsafe {
-        blst_fr_from_uint64(
-            &mut root_of_unity,
-            SCALE2_ROOT_OF_UNITY[max_scale as usize].as_ptr(),
-        );
-    }
-
-    /*
-     * Allocate an array to store the expanded roots of unity. We do this
-     * instead of re-using roots_of_unity_out because the expansion requires
-     * max_width+1 elements.
-     */
-
-    /* Populate the roots of unity */
-    let mut expanded_roots = expand_root_of_unity(&root_of_unity, max_width)?;
-    /* Copy all but the last root to the roots of unity */
-    // NOTE: deviating from c code here
-    expanded_roots.pop();
-
-    /* Permute the roots of unity */
-    let roots_of_unity_out = bit_reversal_permutation(expanded_roots, max_width as usize)?;
-
-    Ok(roots_of_unity_out)
-}
-
-fn is_trusted_setup_in_lagrange_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
-    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
-) -> Result<(), Error> {
-    /* Trusted setup is too small; we can't work with this */
-    if s.g1_values.len() < 2 || s.g2_values.len() < 2 {
-        return Err(Error::BadArgs(
-            "is_trusted_setup_in_lagrange_form invalid args".to_string(),
-        ));
-    }
-
-    /*
-     * If the following pairing equation checks out:
-     *     e(G1_SETUP[1], G2_SETUP[0]) ?= e(G1_SETUP[0], G2_SETUP[1])
-     * then the trusted setup was loaded in monomial form.
-     * If so, error out since we want the trusted setup in Lagrange form.
-     */
-    let is_monomial_form = pairings_verify(
-        &s.g1_values[1],
-        &s.g2_values[0],
-        &s.g1_values[0],
-        &s.g2_values[1],
-    );
-
-    if is_monomial_form {
-        Err(Error::BadArgs(
-            "is_trusted_setup_in_lagrange_form monomial form".to_string(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 fn load_trusted_setup<const FIELD_ELEMENTS_PER_BLOB: usize>(
     g1_bytes: Vec<u8>,
     g2_bytes: Vec<u8>,
     n1: usize,
     n2: usize,
-    trusted_setup_num_g1_points: usize,
 ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
     let mut kzg_settings = KzgSettingsGeneric::default();
 
     /* Sanity check in case this is called directly */
 
-    if n1 != trusted_setup_num_g1_points || n2 != TRUSTED_SETUP_NUM_G2_POINTS {
+    if n1 != FIELD_ELEMENTS_PER_BLOB || n2 != TRUSTED_SETUP_NUM_G2_POINTS {
         return Err(Error::BadArgs(
             "load_trusted_setup invalid params".to_string(),
         ));
@@ -481,32 +351,89 @@ impl Deref for KzgCommitment {
     }
 }
 
-pub fn load_trusted_setup_from_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    trusted_setup_json_file: P,
+/// Load trusted setup from a file.
+///
+/// The file format is `n1 n2 g1_1 g1_2 ... g1_n1 g2_1 ... g2_n2` where
+/// the first two numbers are in decimal and the remainder are hexstrings
+/// and any whitespace can be used as separators.
+fn load_trusted_setup_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLOB: usize>(
+    trusted_setup_file: P,
 ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
-    let trusted_setup_file = std::fs::File::open(trusted_setup_json_file)
-        .map_err(|e| Error::InvalidTrustedSetup(e.to_string()))?;
-    let trusted_setup: TrustedSetupGeneric<FIELD_ELEMENTS_PER_BLOB> =
-        serde_json::from_reader(&trusted_setup_file).unwrap();
-    let n1 = trusted_setup.g1_len();
-    let n2 = trusted_setup.g2_len();
-    let g1_points = trusted_setup
-        .g1_points()
-        .into_iter()
-        .fold(vec![], |mut acc, x| {
-            acc.extend_from_slice(&x);
-            acc
-        });
-    let g2_points = trusted_setup
-        .g2_points()
-        .into_iter()
-        .fold(vec![], |mut acc, x| {
-            acc.extend_from_slice(&x);
-            acc
-        });
-    load_trusted_setup(g1_points, g2_points, n1, n2, FIELD_ELEMENTS_PER_BLOB)
+    let file = File::open(trusted_setup_file).map_err(|e| {
+        Error::InvalidTrustedSetup(format!("Failed to open trusted setup file: {:?}", e))
+    })?;
+
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+
+    let mut lines = reader.lines();
+
+    let Some(Ok(field_elements_per_blob)) = lines.next() else {
+        return Err(Error::InvalidTrustedSetup(
+            "Trusted setup file does not contain valid FIELD_ELEMENTS_PER_BLOB on line 1"
+                .to_string(),
+        ));
+    };
+    let field_elements_per_blob: usize = field_elements_per_blob.parse().map_err(|_| {
+        Error::InvalidTrustedSetup("FIELD_ELEMENTS_PER_BLOB is not a valid integer".to_string())
+    })?;
+    if field_elements_per_blob != FIELD_ELEMENTS_PER_BLOB {
+        return Err(Error::InvalidTrustedSetup(format!(
+            "Invalid trusted setup for chosen preset. \
+            Selected preset FIELD_ELEMENTS_PER_BLBO: {} \
+            FIELD_ELEMENTS_PER_BLOB value in file: {}",
+            FIELD_ELEMENTS_PER_BLOB, field_elements_per_blob
+        )));
+    }
+
+    let Some(Ok(num_g2_points)) = lines.next() else {
+        return Err(Error::InvalidTrustedSetup(
+            "Trusted setup file does not contain valid NUM_G2_POINTS on line 2".to_string(),
+        ));
+    };
+    let num_g2_points: usize = num_g2_points.parse().map_err(|_| {
+        Error::InvalidTrustedSetup("FIELD_ELEMENTS_PER_BLOB is not a valid integer".to_string())
+    })?;
+
+    if num_g2_points != 65 {
+        return Err(Error::InvalidTrustedSetup(format!(
+            "Invalid trusted setup for chosen preset. \
+            Selected preset NUM_G2_POINTS: {} \
+            NUM_G2_POINTS value in file: {}",
+            65, num_g2_points
+        )));
+    }
+
+    let mut g1_bytes = Vec::new();
+    for _ in 0..field_elements_per_blob {
+        let g1_point = hex_to_bytes(
+            &lines
+                .next()
+                .ok_or_else(|| {
+                    Error::InvalidTrustedSetup("Invalid number of g1 points in file".to_string())
+                })?
+                .map_err(|_| Error::InvalidTrustedSetup("Invalid g1 point string".to_string()))?,
+        )?;
+        g1_bytes.extend_from_slice(&g1_point);
+    }
+
+    let mut g2_bytes = Vec::new();
+    for _ in 0..num_g2_points {
+        let g2_point = hex_to_bytes(
+            &lines
+                .next()
+                .ok_or_else(|| {
+                    Error::InvalidTrustedSetup("Invalid number of g2 points in file".to_string())
+                })?
+                .map_err(|_| Error::InvalidTrustedSetup("Invalid g2 point string".to_string()))?,
+        )?;
+        g2_bytes.extend_from_slice(&g2_point);
+    }
+
+    load_trusted_setup(g1_bytes, g2_bytes, field_elements_per_blob, num_g2_points)
 }
 
+/// Deserialize a `Blob` (array of bytes) into a `Polynomial` (array of field elements).
 fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
 ) -> Result<Polynomial<FIELD_ELEMENTS_PER_BLOB>, Error> {
@@ -520,8 +447,10 @@ fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB
     Ok(poly)
 }
 
-/// Note: using commitment_bytes instead of g1_t like the c code since
-/// we seem to be doing unnecessary conversions
+/// Return the Fiat-Shamir challenge required to verify `blob` and
+/// `commitment`.
+/// Note: using commitment_bytes instead of `g1_t` like the c code since
+/// we seem to be doing unnecessary conversions.
 fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &Bytes48,
@@ -537,10 +466,10 @@ fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
 
     /* Copy polynomial degree (16-bytes, big-endian) */
     bytes[offset..offset + std::mem::size_of::<u64>()]
-        .copy_from_slice(0u64.to_be_bytes().as_slice());
+        .copy_from_slice(bytes_from_uint64(0u64).as_slice());
     offset += std::mem::size_of::<u64>();
     bytes[offset..offset + std::mem::size_of::<u64>()]
-        .copy_from_slice(FIELD_ELEMENTS_PER_BLOB.to_be_bytes().as_slice());
+        .copy_from_slice(bytes_from_uint64(FIELD_ELEMENTS_PER_BLOB as u64).as_slice());
     offset += std::mem::size_of::<u64>();
 
     /* Copy blob */
@@ -573,6 +502,7 @@ fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
 // Polynomials Functions
 ///////////////////////////////////////////////////////////////////////////////
 
+/// Evaluate a polynomial in evaluation form at a given point.
 fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
     p: &Polynomial<FIELD_ELEMENTS_PER_BLOB>,
     x: &fr_t,
@@ -606,7 +536,7 @@ fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
             blst_fr_add(&mut res, &res, &tmp);
         }
     }
-    res = fr_div(res, fr_from_u64(FIELD_ELEMENTS_PER_BLOB as u64));
+    res = fr_div(res, fr_from_uint64(FIELD_ELEMENTS_PER_BLOB as u64));
     unsafe {
         blst_fr_sub(
             &mut tmp,
@@ -622,6 +552,7 @@ fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
 // KZG Functions
 ///////////////////////////////////////////////////////////////////////////////
 
+/// Compute a KZG commitment from a polynomial.
 fn poly_to_kzg_commitment<const FIELD_ELEMENTS_PER_BLOB: usize>(
     p: &Polynomial<FIELD_ELEMENTS_PER_BLOB>,
     s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
@@ -629,6 +560,7 @@ fn poly_to_kzg_commitment<const FIELD_ELEMENTS_PER_BLOB: usize>(
     g1_lincomb_fast(&s.g1_values, p.evals.as_slice())
 }
 
+/// Convert a blob to a KZG commitment.
 fn blob_to_kzg_commitment<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
@@ -639,6 +571,44 @@ fn blob_to_kzg_commitment<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_
     Ok(KzgCommitment(commitment_bytes))
 }
 
+/// Helper function: Verify KZG proof claiming that `p(z) == y`.
+fn verify_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
+    commitment: &g1_t,
+    z: &fr_t,
+    y: &fr_t,
+    proof: &g1_t,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
+) -> bool {
+    /* Calculate: X_minus_z */
+    let x_g2 = g2_mul(&G2_GENERATOR, z);
+    let x_minus_z = g2_sub(&s.g2_values[1], &x_g2);
+
+    /* Calculate: P_minus_y */
+    let y_g1 = g1_mul(&G1_GENERATOR, y);
+    let p_minus_y = g1_sub(commitment, &y_g1);
+
+    /* Verify: P - y = Q * (X - z) */
+    pairings_verify(&p_minus_y, &G2_GENERATOR, proof, &x_minus_z)
+}
+
+/// Verify a KZG proof claiming that `p(z) == y`.
+fn verify_kzg_proof<const FIELD_ELEMENTS_PER_BLOB: usize>(
+    commitment_bytes: &KzgCommitment,
+    z_bytes: &Bytes32,
+    y_bytes: &Bytes32,
+    proof_bytes: &KzgProof,
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
+) -> Result<bool, Error> {
+    let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
+    let z = bytes_to_bls_field(z_bytes)?;
+    let y = bytes_to_bls_field(y_bytes)?;
+    let proof = bytes_to_kzg_proof(&proof_bytes.0)?;
+
+    /* Call helper to do pairings check */
+    Ok(verify_kzg_proof_impl(&commitment, &z, &y, &proof, s))
+}
+
+/// Compute KZG proof for polynomial in Lagrange form at position `z`.
 fn compute_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     z_bytes: &Bytes32,
@@ -652,20 +622,8 @@ fn compute_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
     Ok((proof, y_bytes))
 }
 
-fn compute_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    blob: &BlobGeneric<BYTES_PER_BLOB>,
-    commitment_bytes: &KzgCommitment,
-    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
-) -> Result<KzgProof, Error> {
-    let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
-    /* Compute the challenge for the given blob/commitment */
-    let evaluation_challenge_fr =
-        compute_challenge::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, &commitment_bytes.0)?;
-
-    /* Call helper function to compute proof and y */
-    compute_kzg_proof_impl(&poly, &evaluation_challenge_fr, s).map(|(proof, _)| proof)
-}
-
+/// Helper function for `compute_kzg_proof()` and
+/// `compute_blob_kzg_proof()`.
 fn compute_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     polynomial: &Polynomial<FIELD_ELEMENTS_PER_BLOB>,
     z: &fr_t,
@@ -736,41 +694,24 @@ fn compute_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     Ok((KzgProof(proof), y_out))
 }
 
-fn verify_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
-    commitment: &g1_t,
-    z: &fr_t,
-    y: &fr_t,
-    proof: &g1_t,
-    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
-) -> bool {
-    /* Calculate: X_minus_z */
-    let x_g2 = g2_mul(&G2_GENERATOR, z);
-    let x_minus_z = g2_sub(&s.g2_values[1], &x_g2);
-
-    /* Calculate: P_minus_y */
-    let y_g1 = g1_mul(&G1_GENERATOR, y);
-    let p_minus_y = g1_sub(commitment, &y_g1);
-
-    /* Verify: P - y = Q * (X - z) */
-    pairings_verify(&p_minus_y, &G2_GENERATOR, proof, &x_minus_z)
-}
-
-fn verify_kzg_proof<const FIELD_ELEMENTS_PER_BLOB: usize>(
+/// Given a blob and a commitment, return the KZG proof that is used to verify
+/// it against the commitment. This function does not verify that the commitment
+/// is correct with respect to the blob.
+fn compute_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
+    blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &KzgCommitment,
-    z_bytes: &Bytes32,
-    y_bytes: &Bytes32,
-    proof_bytes: &KzgProof,
     s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
-) -> Result<bool, Error> {
-    let commitment = bytes_to_kzg_commitment(&commitment_bytes.0)?;
-    let z = bytes_to_bls_field(z_bytes)?;
-    let y = bytes_to_bls_field(y_bytes)?;
-    let proof = bytes_to_kzg_proof(&proof_bytes.0)?;
+) -> Result<KzgProof, Error> {
+    let poly = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob)?;
+    /* Compute the challenge for the given blob/commitment */
+    let evaluation_challenge_fr =
+        compute_challenge::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, &commitment_bytes.0)?;
 
-    /* Call helper to do pairings check */
-    Ok(verify_kzg_proof_impl(&commitment, &z, &y, &proof, s))
+    /* Call helper function to compute proof and y */
+    compute_kzg_proof_impl(&poly, &evaluation_challenge_fr, s).map(|(proof, _)| proof)
 }
 
+/// Given a blob and its proof, verify that it corresponds to the provided commitment.
 fn verify_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
     commitment_bytes: &KzgCommitment,
@@ -800,6 +741,14 @@ fn verify_blob_kzg_proof<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_B
     ))
 }
 
+/// Helper function for `verify_blob_kzg_proof_batch()`: actually perform the
+/// verification.
+///
+/// NOTE: This function assumes that `n` is trusted and that all input arrays
+/// contain `n` elements. `n` should be the actual size of the arrays and not
+/// read off a length field in the protocol.
+///
+/// This function only works for `n > 0`.
 fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
     commitments_g1: &[g1_t],
     zs_fr: &[fr_t],
@@ -851,6 +800,14 @@ fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
     Ok(res)
 }
 
+/// Given a list of blobs and blob KZG proofs, verify that they correspond to the
+/// provided commitments.
+///
+/// NOTE: This function assumes that `n` is trusted and that all input arrays
+/// contain `n` elements. `n` should be the actual size of the arrays and not
+/// read off a length field in the protocol.
+///
+/// This function accepts if called with `n==0`.
 fn verify_blob_kzg_proof_batch<
     const BYTES_PER_BLOB: usize,
     const FIELD_ELEMENTS_PER_BLOB: usize,
@@ -920,38 +877,234 @@ fn verify_blob_kzg_proof_batch<
     Ok(res)
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Trusted Setup Functions
+///////////////////////////////////////////////////////////////////////////////
+
+/// Reverse the bit order in a 32 bit integer.
+fn reverse_bits(mut n: u32, order: u32) -> u32 {
+    assert!(order.is_power_of_two());
+    let order = order.ilog2();
+    let mut result = 0;
+    for _ in 0..order {
+        result <<= 1;
+        result |= n & 1;
+        n >>= 1;
+    }
+    result
+}
+
+/// Reorder an array in reverse bit order of its indices.
+///
+/// NOTE: Not swapping in place like the c code, returns a new vector.
+/// Code wise, this is the highest diff function from the c code. We leverage rust generics
+/// to accept a vector of arbitrary type instead of dealing with void * pointers like in the
+/// c code.
+fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>, Error> {
+    if values.is_empty() || n >> 32 != 0 || !n.is_power_of_two() || n.ilog2() == 0 {
+        return Err(Error::BadArgs(
+            "bit_reversal_permutation invalid args".to_string(),
+        ));
+    }
+
+    let mut res = Vec::with_capacity(n);
+    for i in 0..n {
+        let bit_reversed_i = reverse_bits(i as u32, n as u32);
+        res.push(values[bit_reversed_i as usize]);
+    }
+
+    Ok(res)
+}
+
+/// Generate powers of a root of unity in the field.
+fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, Error> {
+    let mut res: Vec<blst_fr> = (0..width + 1).map(|_| blst_fr::default()).collect();
+    res[0] = FR_ONE;
+    res[1] = *root;
+
+    let mut i = 2usize;
+    let mut tmp = blst_fr::default();
+
+    while !fr_is_one(&res[i - 1]) {
+        if i > width as usize {
+            return Err(Error::BadArgs("expand_root_of_unity i > width".to_string()));
+        }
+        unsafe {
+            blst_fr_mul(&mut tmp, &res[i - 1], root);
+        }
+        res[i] = tmp;
+        i += 1;
+    }
+
+    if !fr_is_one(&res[width as usize]) {
+        return Err(Error::BadArgs(
+            "expand_root_of_unity assertion failed".to_string(),
+        ));
+    }
+    Ok(res)
+}
+
+/// Initialize the roots of unity.
+fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, Error> {
+    /* Calculate the max width */
+    let max_width = 1 << max_scale;
+
+    /* Get the root of unity */
+    if max_scale >= SCALE2_ROOT_OF_UNITY.len() as u32 {
+        return Err(Error::BadArgs(
+            "compute_roots_of_unity max_scale too large".to_string(),
+        ));
+    }
+
+    let mut root_of_unity = fr_t::default();
+    unsafe {
+        blst_fr_from_uint64(
+            &mut root_of_unity,
+            SCALE2_ROOT_OF_UNITY[max_scale as usize].as_ptr(),
+        );
+    }
+
+    /*
+     * Allocate an array to store the expanded roots of unity. We do this
+     * instead of re-using roots_of_unity_out because the expansion requires
+     * max_width+1 elements.
+     */
+
+    /* Populate the roots of unity */
+    let mut expanded_roots = expand_root_of_unity(&root_of_unity, max_width)?;
+    /* Copy all but the last root to the roots of unity */
+    // NOTE: deviating from c code here
+    expanded_roots.pop();
+
+    /* Permute the roots of unity */
+    let roots_of_unity_out = bit_reversal_permutation(expanded_roots, max_width as usize)?;
+
+    Ok(roots_of_unity_out)
+}
+
+/// Basic sanity check that the trusted setup was loaded in Lagrange form.
+fn is_trusted_setup_in_lagrange_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
+    s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
+) -> Result<(), Error> {
+    /* Trusted setup is too small; we can't work with this */
+    if s.g1_values.len() < 2 || s.g2_values.len() < 2 {
+        return Err(Error::BadArgs(
+            "is_trusted_setup_in_lagrange_form invalid args".to_string(),
+        ));
+    }
+
+    /*
+     * If the following pairing equation checks out:
+     *     e(G1_SETUP[1], G2_SETUP[0]) ?= e(G1_SETUP[0], G2_SETUP[1])
+     * then the trusted setup was loaded in monomial form.
+     * If so, error out since we want the trusted setup in Lagrange form.
+     */
+    let is_monomial_form = pairings_verify(
+        &s.g1_values[1],
+        &s.g2_values[0],
+        &s.g1_values[0],
+        &s.g2_values[1],
+    );
+
+    if is_monomial_form {
+        Err(Error::BadArgs(
+            "is_trusted_setup_in_lagrange_form monomial form".to_string(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// A proc-macro for generating a `Kzg` module with a specified value for the`FIELD_ELEMENTS_PER_BLOB`
+/// constant.
+///
+/// Generates a `$module_name::Kzg` struct on which we implement the follwing KZG public interface methods:
+/// - `load_trusted_setup`
+/// - `load_trusted_setup_file`
+/// - `blob_to_kzg_commitment`
+/// - `compute_kzg_proof`
+/// - `compute_blob_kzg_proof`
+/// - `verify_kzg_proof`
+/// - `verify_blob_kzg_proof`
+/// - `verify_blob_kzg_proof_batch`
+///
+/// The exposed structs are:
+/// - `Blob`
+/// - `KzgSettings`
+/// - `TrustedSetup`
+///
+/// The exposed constant values are:
+/// - `FIELD_ELEMENTS_PER_BLOB`
+/// - `BYTES_PER_BLOB`
 macro_rules! impl_kzg_presets {
     ($module_name:ident, $field_elements_per_blob:ident) => {
         pub mod $module_name {
             use super::*;
 
+            /// A wrapper struct that exposes interface functions from the C code
+            /// as struct methods.
             pub struct Kzg;
 
+            /// This value represents the number of field elements in a blob. It must be
+            /// supplied externally.
+            ///
+            /// It is expected to be 4096 for mainnet and 4 for minimal.
             pub const FIELD_ELEMENTS_PER_BLOB: usize = $field_elements_per_blob;
+
+            /// The number of bytes in a blob.
             pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
+
+            /// A basic blob data.
             pub type Blob = BlobGeneric<BYTES_PER_BLOB>;
+
+            /// Stores the setup and parameters needed for computing KZG proofs.
             pub type KzgSettings = KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>;
+
+            /// This struct does not exist in the C library.
+            ///
+            /// Helpful for reading and parsing trusted setup files in specified json
+            /// format.
+            ///
+            /// ```json
+            /// {
+            ///     "setup_G1": [],
+            ///     "setup_G2": [],
+            ///     "setup_G1_lagrange": [],
+            ///     "roots_of_unity": [],
+            /// }
+            /// ```
+            ///
+            /// Check `testing_trusted_setup.json` in base directory for an example.
             pub type TrustedSetup = TrustedSetupGeneric<FIELD_ELEMENTS_PER_BLOB>;
 
             impl Kzg {
-                pub fn load_trusted_setup_from_file<P: AsRef<Path>>(
-                    trusted_setup_json_file: P,
+                /// Loads a trusted setup in the format described below and
+                /// returns a `KzgSettings` struct.
+                ///
+                /// The file format is as follows:
+                ///
+                /// FIELD_ELEMENTS_PER_BLOB
+                /// 65 # This is fixed and is used for providing multiproofs up to 64 field elements.
+                /// `FIELD_ELEMENT_PER_BLOB` lines with each line containing a hex encoded g1 byte value.
+                /// 65 lines with each line containing a hex encoded g2 byte value.
+                pub fn load_trusted_setup_file<P: AsRef<Path>>(
+                    trusted_setup_file: P,
                 ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
-                    load_trusted_setup_from_file::<_, FIELD_ELEMENTS_PER_BLOB>(
-                        trusted_setup_json_file,
-                    )
+                    load_trusted_setup_file::<_, FIELD_ELEMENTS_PER_BLOB>(trusted_setup_file)
                 }
 
+                /// Loads a trusted setup and returns a `KzgSettings` struct.
+                ///
+                /// The `g1_bytes` and `g2_bytes` need to be extracted and parsed from a file
+                /// and then passed into this function.
                 pub fn load_trusted_setup(
                     g1_bytes: Vec<[u8; BYTES_PER_G1]>,
                     g2_bytes: Vec<[u8; BYTES_PER_G2]>,
                 ) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
-                    KzgSettingsGeneric::load_trusted_setup(
-                        g1_bytes,
-                        g2_bytes,
-                    )
+                    KzgSettingsGeneric::load_trusted_setup(g1_bytes, g2_bytes)
                 }
 
+                /// Return the `KzgCommitment` corresponding to the `Blob`.
                 pub fn blob_to_kzg_commitment(
                     blob: &Blob,
                     s: &KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>,
@@ -959,6 +1112,7 @@ macro_rules! impl_kzg_presets {
                     blob_to_kzg_commitment::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, s)
                 }
 
+                /// Compute the `KzgProof` given the `Blob` at the point corresponding to field element `z`.
                 pub fn compute_kzg_proof(
                     blob: &Blob,
                     z_bytes: &Bytes32,
@@ -967,6 +1121,7 @@ macro_rules! impl_kzg_presets {
                     compute_kzg_proof::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(blob, z_bytes, s)
                 }
 
+                /// Compute the `KzgProof` given the `Blob` and `KzgCommitment`.
                 pub fn compute_blob_kzg_proof(
                     blob: &Blob,
                     commitment_bytes: &KzgCommitment,
@@ -979,6 +1134,7 @@ macro_rules! impl_kzg_presets {
                     )
                 }
 
+                /// Verify a KZG proof claiming that `p(z) == y`.
                 pub fn verify_kzg_proof(
                     commitment_bytes: &KzgCommitment,
                     z_bytes: &Bytes32,
@@ -989,6 +1145,7 @@ macro_rules! impl_kzg_presets {
                     verify_kzg_proof(commitment_bytes, z_bytes, y_bytes, proof_bytes, s)
                 }
 
+                /// Given a blob and its proof, verify that it corresponds to the provided commitment.
                 pub fn verify_blob_kzg_proof(
                     blob: &Blob,
                     commitment_bytes: &KzgCommitment,
@@ -1003,6 +1160,8 @@ macro_rules! impl_kzg_presets {
                     )
                 }
 
+                /// Given a list of blobs and blob KZG proofs, verify that they correspond to the
+                /// provided commitments.
                 pub fn verify_blob_kzg_proof_batch(
                     blobs: &[Blob],
                     commitment_bytes: &[KzgCommitment],
