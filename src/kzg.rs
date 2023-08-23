@@ -772,7 +772,7 @@ fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
     let mut r_times_z: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
 
     /* Compute \sum r^i * Proof_i */
-    let proof_lincomb = g1_lincomb_naive(proofs_g1, &r_powers);
+    let proof_lincomb = g1_lincomb_naive(proofs_g1, &r_powers)?;
 
     for i in 0..n {
         /* Get [y_i] */
@@ -785,9 +785,9 @@ fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
         }
     }
     /* Get \sum r^i z_i Proof_i */
-    let proof_z_lincomb = g1_lincomb_naive(proofs_g1, &r_times_z);
+    let proof_z_lincomb = g1_lincomb_naive(proofs_g1, &r_times_z)?;
 
-    let c_minus_y_lincomb = g1_lincomb_naive(&c_minus_y, &r_powers);
+    let c_minus_y_lincomb = g1_lincomb_naive(&c_minus_y, &r_powers)?;
 
     let mut rhs_g1 = blst_p1::default();
     /* Get C_minus_y_lincomb + proof_z_lincomb */

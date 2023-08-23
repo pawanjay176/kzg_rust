@@ -266,7 +266,7 @@ pub(crate) fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
         blst_scalar_from_bendian(&mut tmp, b.bytes.as_ptr());
         if !blst_scalar_fr_check(&tmp) {
             return Err(Error::BadArgs(
-                "bytes_to_bls_field Invalid bytes32".to_string(),
+                "bytes_to_bls_field Invalid Bytes32".to_string(),
             ));
         }
         blst_fr_from_scalar(&mut res, &tmp);
@@ -326,8 +326,10 @@ pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
 ///
 /// This function computes the result naively without using Pippenger's
 /// algorithm.
-pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
-    assert_eq!(p.len(), coeffs.len());
+pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
+    if p.len() != coeffs.len() {
+        return Err(Error::InternalError);
+    }
     let len = p.len();
 
     let mut tmp;
@@ -336,7 +338,7 @@ pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
         tmp = g1_mul(&p[i], &coeffs[i]);
         unsafe { blst_p1_add_or_double(&mut res, &res, &tmp) }
     }
-    res
+    Ok(res)
 }
 
 ///  Calculate a linear combination of G1 group elements.
@@ -365,13 +367,16 @@ pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
 pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
     let len = p.len();
     if len < 8 {
-        return Ok(g1_lincomb_naive(p, coeffs));
+        return g1_lincomb_naive(p, coeffs);
     }
     let scratch_size: usize;
     let mut res = g1_t::default();
     unsafe {
         scratch_size = blst_p1s_mult_pippenger_scratch_sizeof(len);
     }
+    // Note: In the C code, `scratch` is a a void pointer. We use a u64 array because
+    // the ffi function `blst_p1s_mult_pippenger` implementation below accepts a pointer of form
+    // *mut u64.
     let mut scratch: Vec<_> = (0..scratch_size).map(|_| 0u64).collect();
     let mut p_affine: Vec<_> = (0..len).map(|_| blst_p1_affine::default()).collect();
     let mut scalars: Vec<_> = (0..len).map(|_| blst_scalar::default()).collect();
@@ -387,7 +392,8 @@ pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error
         }
 
         /* Call the Pippenger implementation */
-        // WARNING: potential segfault here
+        // Note: the corresponding C code is
+        // const byte *scalars_arg[2] = {(byte *)scalars, NULL};
         let scalars_arg: [_; 2] = [scalars[0].b.as_ptr(), std::ptr::null()];
         let points_arg: [_; 2] = [p_affine.as_ptr(), std::ptr::null()];
         blst_p1s_mult_pippenger(
@@ -423,6 +429,12 @@ pub(crate) fn compute_r_powers<const FIELD_ELEMENTS_PER_BLOB: usize>(
     ys_fr: &[fr_t],
     proofs_g1: &[g1_t],
 ) -> Result<Vec<fr_t>, Error> {
+    if commitments_g1.len() != zs_fr.len()
+        && commitments_g1.len() != ys_fr.len()
+        && commitments_g1.len() != proofs_g1.len()
+    {
+        return Err(Error::InternalError);
+    }
     let n = commitments_g1.len();
     let input_size = DOMAIN_STR_LENGTH
         + std::mem::size_of::<u64>()
