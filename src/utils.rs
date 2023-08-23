@@ -10,7 +10,11 @@ use BLST_ERROR::BLST_SUCCESS;
 ///
 /// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
 pub(crate) fn fr_is_one(p: &fr_t) -> bool {
-    *p == FR_ONE
+    let mut a = [0u64; 4];
+    unsafe {
+        blst_uint64_from_fr(a.as_mut_ptr(), p);
+    }
+    a[0] == 1 && a[1] == 0 && a[2] == 0 && a[3] == 0
 }
 
 /// Test whether the operand is zero in the finite field.
@@ -259,7 +263,7 @@ pub(crate) fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
 }
 
 /// Perform BLS validation required by the types `KZGProof` and `KZGCommitment`.
-/// 
+///
 /// Note: This function deviates from the spec because it returns (via an
 /// output argument) the g1 point. This way is more efficient (faster)
 /// but the function name is a bit misleading.
@@ -299,7 +303,7 @@ pub fn bytes_to_kzg_commitment(b: &Bytes48) -> Result<g1_t, Error> {
 }
 
 /// Convert untrusted bytes into a trusted and validated KZGProof.
- pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
+pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
     validate_kzg_g1(b)
 }
 
@@ -324,27 +328,27 @@ pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
 }
 
 ///  Calculate a linear combination of G1 group elements.
-/// 
+///
 ///  Calculates `[coeffs_0]p_0 + [coeffs_1]p_1 + ... + [coeffs_n]p_n`
 ///  where `n` is `len - 1`.
-/// 
+///
 ///  NOTE: This function **MUST NOT** be called with the point at infinity in `p`.
-/// 
+///
 ///  While this function is significantly faster than
 ///  `g1_lincomb_naive()`, we refrain from using it in security-critical places
 ///  (like verification) because the blst Pippenger code has not been
 ///  audited. In those critical places, we prefer using `g1_lincomb_naive()` which
 ///  is much simpler.
-/// 
+///
 ///  For the benefit of future generations (since Blst has no documentation to
 ///  speak of), there are two ways to pass the arrays of scalars and points
 ///  into blst_p1s_mult_pippenger().
-/// 
+///
 ///  1. Pass `points` as an array of pointers to the points, and pass
 ///     `scalars` as an array of pointers to the scalars, each of length p.len().
 ///  2. Pass an array where the first element is a pointer to the contiguous
 ///     array of points and the second is null, and similarly for scalars.
-/// 
+///
 ///  We do the second of these to save memory here.
 pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
     let len = p.len();
