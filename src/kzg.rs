@@ -8,10 +8,6 @@ use std::path::Path;
 
 use BLST_ERROR::BLST_SUCCESS;
 
-// pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
-// /// The number of g1 points in a trusted setup.
-// pub const TRUSTED_SETUP_NUM_G1_POINTS: usize = FIELD_ELEMENTS_PER_BLOB;
-
 #[derive(Debug)]
 pub enum Error {
     /// The supplied data is invalid in some way.
@@ -208,74 +204,6 @@ impl KzgProof {
     }
 }
 
-fn load_trusted_setup<const FIELD_ELEMENTS_PER_BLOB: usize>(
-    g1_bytes: Vec<u8>,
-    g2_bytes: Vec<u8>,
-    n1: usize,
-    n2: usize,
-) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
-    let mut kzg_settings = KzgSettingsGeneric::default();
-
-    /* Sanity check in case this is called directly */
-
-    if n1 != FIELD_ELEMENTS_PER_BLOB || n2 != TRUSTED_SETUP_NUM_G2_POINTS {
-        return Err(Error::BadArgs(
-            "load_trusted_setup invalid params".to_string(),
-        ));
-    }
-
-    /* 1<<max_scale is the smallest power of 2 >= n1 */
-    let mut max_scale = 0;
-    while (1 << max_scale) < n1 {
-        max_scale += 1;
-    }
-
-    /* Set the max_width */
-    kzg_settings.max_width = 1 << max_scale;
-
-    /* Convert all g1 bytes to g1 points */
-    for i in 0..n1 {
-        let mut g1_affine = blst_p1_affine::default();
-        unsafe {
-            let err = blst_p1_uncompress(&mut g1_affine, &g1_bytes[BYTES_PER_G1 * i]);
-            if err != BLST_SUCCESS {
-                return Err(Error::BadArgs(
-                    "load_trusted_setup Invalid g1 bytes".to_string(),
-                ));
-            }
-            let mut tmp = g1_t::default();
-            blst_p1_from_affine(&mut tmp, &g1_affine);
-            kzg_settings.g1_values.push(tmp);
-        }
-    }
-    /* Convert all g2 bytes to g2 points */
-    for i in 0..n2 {
-        let mut g2_affine = blst_p2_affine::default();
-        unsafe {
-            let err = blst_p2_uncompress(&mut g2_affine, &g2_bytes[BYTES_PER_G2 * i]);
-            if err != BLST_SUCCESS {
-                return Err(Error::BadArgs(
-                    "load_trusted_setup invalid g2 bytes".to_string(),
-                ));
-            }
-            let mut tmp = g2_t::default();
-            blst_p2_from_affine(&mut tmp, &g2_affine);
-            kzg_settings.g2_values.push(tmp);
-        }
-    }
-
-    /* Make sure the trusted setup was loaded in Lagrange form */
-    is_trusted_setup_in_lagrange_form(&kzg_settings)?;
-
-    /* Compute roots of unity and permute the G1 trusted setup */
-    let roots_of_unity = compute_roots_of_unity(max_scale)?;
-    kzg_settings.roots_of_unity = roots_of_unity;
-    let bit_reversed_permutation = bit_reversal_permutation(kzg_settings.g1_values, n1)?;
-    kzg_settings.g1_values = bit_reversed_permutation;
-
-    Ok(kzg_settings)
-}
-
 impl From<[u8; BYTES_PER_COMMITMENT]> for KzgCommitment {
     fn from(value: [u8; BYTES_PER_COMMITMENT]) -> Self {
         Self(Bytes48 { bytes: value })
@@ -351,88 +279,6 @@ impl Deref for KzgCommitment {
     }
 }
 
-/// Load trusted setup from a file.
-///
-/// The file format is `n1 n2 g1_1 g1_2 ... g1_n1 g2_1 ... g2_n2` where
-/// the first two numbers are in decimal and the remainder are hexstrings
-/// and any whitespace can be used as separators.
-fn load_trusted_setup_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLOB: usize>(
-    trusted_setup_file: P,
-) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
-    let file = File::open(trusted_setup_file).map_err(|e| {
-        Error::InvalidTrustedSetup(format!("Failed to open trusted setup file: {:?}", e))
-    })?;
-
-    use std::io::{BufRead, BufReader};
-    let reader = BufReader::new(file);
-
-    let mut lines = reader.lines();
-
-    let Some(Ok(field_elements_per_blob)) = lines.next() else {
-        return Err(Error::InvalidTrustedSetup(
-            "Trusted setup file does not contain valid FIELD_ELEMENTS_PER_BLOB on line 1"
-                .to_string(),
-        ));
-    };
-    let field_elements_per_blob: usize = field_elements_per_blob.parse().map_err(|_| {
-        Error::InvalidTrustedSetup("FIELD_ELEMENTS_PER_BLOB is not a valid integer".to_string())
-    })?;
-    if field_elements_per_blob != FIELD_ELEMENTS_PER_BLOB {
-        return Err(Error::InvalidTrustedSetup(format!(
-            "Invalid trusted setup for chosen preset. \
-            Selected preset FIELD_ELEMENTS_PER_BLBO: {} \
-            FIELD_ELEMENTS_PER_BLOB value in file: {}",
-            FIELD_ELEMENTS_PER_BLOB, field_elements_per_blob
-        )));
-    }
-
-    let Some(Ok(num_g2_points)) = lines.next() else {
-        return Err(Error::InvalidTrustedSetup(
-            "Trusted setup file does not contain valid NUM_G2_POINTS on line 2".to_string(),
-        ));
-    };
-    let num_g2_points: usize = num_g2_points.parse().map_err(|_| {
-        Error::InvalidTrustedSetup("FIELD_ELEMENTS_PER_BLOB is not a valid integer".to_string())
-    })?;
-
-    if num_g2_points != 65 {
-        return Err(Error::InvalidTrustedSetup(format!(
-            "Invalid trusted setup for chosen preset. \
-            Selected preset NUM_G2_POINTS: {} \
-            NUM_G2_POINTS value in file: {}",
-            65, num_g2_points
-        )));
-    }
-
-    let mut g1_bytes = Vec::new();
-    for _ in 0..field_elements_per_blob {
-        let g1_point = hex_to_bytes(
-            &lines
-                .next()
-                .ok_or_else(|| {
-                    Error::InvalidTrustedSetup("Invalid number of g1 points in file".to_string())
-                })?
-                .map_err(|_| Error::InvalidTrustedSetup("Invalid g1 point string".to_string()))?,
-        )?;
-        g1_bytes.extend_from_slice(&g1_point);
-    }
-
-    let mut g2_bytes = Vec::new();
-    for _ in 0..num_g2_points {
-        let g2_point = hex_to_bytes(
-            &lines
-                .next()
-                .ok_or_else(|| {
-                    Error::InvalidTrustedSetup("Invalid number of g2 points in file".to_string())
-                })?
-                .map_err(|_| Error::InvalidTrustedSetup("Invalid g2 point string".to_string()))?,
-        )?;
-        g2_bytes.extend_from_slice(&g2_point);
-    }
-
-    load_trusted_setup(g1_bytes, g2_bytes, field_elements_per_blob, num_g2_points)
-}
-
 /// Deserialize a `Blob` (array of bytes) into a `Polynomial` (array of field elements).
 fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
     blob: &BlobGeneric<BYTES_PER_BLOB>,
@@ -449,6 +295,7 @@ fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB
 
 /// Return the Fiat-Shamir challenge required to verify `blob` and
 /// `commitment`.
+///
 /// Note: using commitment_bytes instead of `g1_t` like the c code since
 /// we seem to be doing unnecessary conversions.
 fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB: usize>(
@@ -485,7 +332,7 @@ fn compute_challenge<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB:
     offset += BYTES_PER_COMMITMENT;
 
     /* Make sure we wrote the entire buffer */
-    assert_eq!(offset, { challenge_input_size });
+    assert_eq!(offset, challenge_input_size);
 
     let mut eval_challenge = Bytes32::default();
     unsafe {
@@ -517,7 +364,7 @@ fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
          * Note that special-casing this is necessary, as the formula below
          * would divide by zero otherwise.
          */
-        if *x == s.roots_of_unity[i] {
+        if fr_equal(x, &s.roots_of_unity[i]) {
             return Ok(p.evals[i]);
         }
         unsafe {
@@ -635,7 +482,7 @@ fn compute_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut m = 0usize;
     for i in 0..FIELD_ELEMENTS_PER_BLOB {
-        if *z == s.roots_of_unity[i] {
+        if fr_equal(z, &s.roots_of_unity[i]) {
             /* We are asked to compute a KZG proof inside the domain */
             m = i + 1;
             inverses_in[i] = FR_ONE;
@@ -772,7 +619,7 @@ fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
     let mut r_times_z: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
 
     /* Compute \sum r^i * Proof_i */
-    let proof_lincomb = g1_lincomb_naive(proofs_g1, &r_powers);
+    let proof_lincomb = g1_lincomb_naive(proofs_g1, &r_powers)?;
 
     for i in 0..n {
         /* Get [y_i] */
@@ -785,9 +632,9 @@ fn verify_kzg_proof_batch<const FIELD_ELEMENTS_PER_BLOB: usize>(
         }
     }
     /* Get \sum r^i z_i Proof_i */
-    let proof_z_lincomb = g1_lincomb_naive(proofs_g1, &r_times_z);
+    let proof_z_lincomb = g1_lincomb_naive(proofs_g1, &r_times_z)?;
 
-    let c_minus_y_lincomb = g1_lincomb_naive(&c_minus_y, &r_powers);
+    let c_minus_y_lincomb = g1_lincomb_naive(&c_minus_y, &r_powers)?;
 
     let mut rhs_g1 = blst_p1::default();
     /* Get C_minus_y_lincomb + proof_z_lincomb */
@@ -896,14 +743,13 @@ fn reverse_bits(mut n: u32, order: u32) -> u32 {
 
 /// Reorder an array in reverse bit order of its indices.
 ///
-/// NOTE: Not swapping in place like the c code, returns a new vector.
-/// Code wise, this is the highest diff function from the c code. We leverage rust generics
-/// to accept a vector of arbitrary type instead of dealing with void * pointers like in the
-/// c code.
+/// NOTE: Unline the C code which swaps in place, this function returns a new vector.
+/// We leverage rust generics to accept a vector of arbitrary type instead of dealing with void * pointers like in the
+/// C code.
 fn bit_reversal_permutation<T: Copy>(values: Vec<T>, n: usize) -> Result<Vec<T>, Error> {
     if values.is_empty() || n >> 32 != 0 || !n.is_power_of_two() || n.ilog2() == 0 {
         return Err(Error::BadArgs(
-            "bit_reversal_permutation invalid args".to_string(),
+            "bit_reversal_permutation: invalid args".to_string(),
         ));
     }
 
@@ -927,7 +773,7 @@ fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, Error> {
 
     while !fr_is_one(&res[i - 1]) {
         if i > width as usize {
-            return Err(Error::BadArgs("expand_root_of_unity i > width".to_string()));
+            return Err(Error::BadArgs("expand_root_of_unity: i > width".to_string()));
         }
         unsafe {
             blst_fr_mul(&mut tmp, &res[i - 1], root);
@@ -938,7 +784,7 @@ fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, Error> {
 
     if !fr_is_one(&res[width as usize]) {
         return Err(Error::BadArgs(
-            "expand_root_of_unity assertion failed".to_string(),
+            "expand_root_of_unity: assertion failed".to_string(),
         ));
     }
     Ok(res)
@@ -952,7 +798,7 @@ fn compute_roots_of_unity(max_scale: u32) -> Result<Vec<fr_t>, Error> {
     /* Get the root of unity */
     if max_scale >= SCALE2_ROOT_OF_UNITY.len() as u32 {
         return Err(Error::BadArgs(
-            "compute_roots_of_unity max_scale too large".to_string(),
+            "compute_roots_of_unity: max_scale too large".to_string(),
         ));
     }
 
@@ -989,7 +835,7 @@ fn is_trusted_setup_in_lagrange_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
     /* Trusted setup is too small; we can't work with this */
     if s.g1_values.len() < 2 || s.g2_values.len() < 2 {
         return Err(Error::BadArgs(
-            "is_trusted_setup_in_lagrange_form invalid args".to_string(),
+            "is_trusted_setup_in_lagrange_form: invalid args".to_string(),
         ));
     }
 
@@ -1008,11 +854,162 @@ fn is_trusted_setup_in_lagrange_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
 
     if is_monomial_form {
         Err(Error::BadArgs(
-            "is_trusted_setup_in_lagrange_form monomial form".to_string(),
+            "is_trusted_setup_in_lagrange_form: not in monomial form".to_string(),
         ))
     } else {
         Ok(())
     }
+}
+
+/// Load trusted setup into a KzgSettings struct.
+fn load_trusted_setup<const FIELD_ELEMENTS_PER_BLOB: usize>(
+    g1_bytes: Vec<u8>,
+    g2_bytes: Vec<u8>,
+    n1: usize,
+    n2: usize,
+) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
+    let mut kzg_settings = KzgSettingsGeneric::default();
+
+    /* Sanity check in case this is called directly */
+
+    if n1 != FIELD_ELEMENTS_PER_BLOB || n2 != TRUSTED_SETUP_NUM_G2_POINTS {
+        return Err(Error::BadArgs(
+            "load_trusted_setup invalid params".to_string(),
+        ));
+    }
+
+    /* 1<<max_scale is the smallest power of 2 >= n1 */
+    let mut max_scale = 0;
+    while (1 << max_scale) < n1 {
+        max_scale += 1;
+    }
+
+    /* Set the max_width */
+    kzg_settings.max_width = 1 << max_scale;
+
+    /* Convert all g1 bytes to g1 points */
+    for i in 0..n1 {
+        let mut g1_affine = blst_p1_affine::default();
+        unsafe {
+            let err = blst_p1_uncompress(&mut g1_affine, &g1_bytes[BYTES_PER_G1 * i]);
+            if err != BLST_SUCCESS {
+                return Err(Error::BadArgs(
+                    "load_trusted_setup Invalid g1 bytes".to_string(),
+                ));
+            }
+            let mut tmp = g1_t::default();
+            blst_p1_from_affine(&mut tmp, &g1_affine);
+            kzg_settings.g1_values.push(tmp);
+        }
+    }
+    /* Convert all g2 bytes to g2 points */
+    for i in 0..n2 {
+        let mut g2_affine = blst_p2_affine::default();
+        unsafe {
+            let err = blst_p2_uncompress(&mut g2_affine, &g2_bytes[BYTES_PER_G2 * i]);
+            if err != BLST_SUCCESS {
+                return Err(Error::BadArgs(
+                    "load_trusted_setup invalid g2 bytes".to_string(),
+                ));
+            }
+            let mut tmp = g2_t::default();
+            blst_p2_from_affine(&mut tmp, &g2_affine);
+            kzg_settings.g2_values.push(tmp);
+        }
+    }
+
+    /* Make sure the trusted setup was loaded in Lagrange form */
+    is_trusted_setup_in_lagrange_form(&kzg_settings)?;
+
+    /* Compute roots of unity and permute the G1 trusted setup */
+    let roots_of_unity = compute_roots_of_unity(max_scale)?;
+    kzg_settings.roots_of_unity = roots_of_unity;
+    let bit_reversed_permutation = bit_reversal_permutation(kzg_settings.g1_values, n1)?;
+    kzg_settings.g1_values = bit_reversed_permutation;
+
+    Ok(kzg_settings)
+}
+
+/// Load trusted setup from a file.
+///
+/// The file format is `n1 n2 g1_1 g1_2 ... g1_n1 g2_1 ... g2_n2` where
+/// the first two numbers are in decimal and the remainder are hexstrings
+/// and any whitespace can be used as separators.
+fn load_trusted_setup_file<P: AsRef<Path>, const FIELD_ELEMENTS_PER_BLOB: usize>(
+    trusted_setup_file: P,
+) -> Result<KzgSettingsGeneric<FIELD_ELEMENTS_PER_BLOB>, Error> {
+    let file = File::open(trusted_setup_file).map_err(|e| {
+        Error::InvalidTrustedSetup(format!("Failed to open trusted setup file: {:?}", e))
+    })?;
+
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+
+    let mut lines = reader.lines();
+
+    let Some(Ok(field_elements_per_blob)) = lines.next() else {
+        return Err(Error::InvalidTrustedSetup(
+            "Trusted setup file does not contain valid FIELD_ELEMENTS_PER_BLOB on line 1"
+                .to_string(),
+        ));
+    };
+    let field_elements_per_blob: usize = field_elements_per_blob.parse().map_err(|_| {
+        Error::InvalidTrustedSetup("FIELD_ELEMENTS_PER_BLOB is not a valid integer".to_string())
+    })?;
+    if field_elements_per_blob != FIELD_ELEMENTS_PER_BLOB {
+        return Err(Error::InvalidTrustedSetup(format!(
+            "Invalid trusted setup for chosen preset. \
+            Selected preset FIELD_ELEMENTS_PER_BLBO: {} \
+            FIELD_ELEMENTS_PER_BLOB value in file: {}",
+            FIELD_ELEMENTS_PER_BLOB, field_elements_per_blob
+        )));
+    }
+
+    let Some(Ok(num_g2_points)) = lines.next() else {
+        return Err(Error::InvalidTrustedSetup(
+            "Trusted setup file does not contain valid NUM_G2_POINTS on line 2".to_string(),
+        ));
+    };
+    let num_g2_points: usize = num_g2_points.parse().map_err(|_| {
+        Error::InvalidTrustedSetup("FIELD_ELEMENTS_PER_BLOB is not a valid integer".to_string())
+    })?;
+
+    if num_g2_points != 65 {
+        return Err(Error::InvalidTrustedSetup(format!(
+            "Invalid trusted setup for chosen preset. \
+            Selected preset NUM_G2_POINTS: {} \
+            NUM_G2_POINTS value in file: {}",
+            65, num_g2_points
+        )));
+    }
+
+    let mut g1_bytes = Vec::new();
+    for _ in 0..field_elements_per_blob {
+        let g1_point = hex_to_bytes(
+            &lines
+                .next()
+                .ok_or_else(|| {
+                    Error::InvalidTrustedSetup("Invalid number of g1 points in file".to_string())
+                })?
+                .map_err(|_| Error::InvalidTrustedSetup("Invalid g1 point string".to_string()))?,
+        )?;
+        g1_bytes.extend_from_slice(&g1_point);
+    }
+
+    let mut g2_bytes = Vec::new();
+    for _ in 0..num_g2_points {
+        let g2_point = hex_to_bytes(
+            &lines
+                .next()
+                .ok_or_else(|| {
+                    Error::InvalidTrustedSetup("Invalid number of g2 points in file".to_string())
+                })?
+                .map_err(|_| Error::InvalidTrustedSetup("Invalid g2 point string".to_string()))?,
+        )?;
+        g2_bytes.extend_from_slice(&g2_point);
+    }
+
+    load_trusted_setup(g1_bytes, g2_bytes, field_elements_per_blob, num_g2_points)
 }
 
 /// A proc-macro for generating a `Kzg` module with a specified value for the`FIELD_ELEMENTS_PER_BLOB`

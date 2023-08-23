@@ -7,17 +7,33 @@ use BLST_ERROR::BLST_SUCCESS;
 /* Helper Functions */
 
 /// Test whether the operand is one in the finite field.
-///
-/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
 pub(crate) fn fr_is_one(p: &fr_t) -> bool {
-    *p == FR_ONE
+    let mut a = [0u64; 4];
+    unsafe {
+        blst_uint64_from_fr(a.as_mut_ptr(), p);
+    }
+    a[0] == 1 && a[1] == 0 && a[2] == 0 && a[3] == 0
 }
 
 /// Test whether the operand is zero in the finite field.
 ///
-/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
+/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl
+/// since `FR_ZERO` is defined as [0, 0, 0, 0]
 pub(crate) fn fr_is_zero(p: &fr_t) -> bool {
     *p == FR_ZERO
+}
+
+/// Test whether two field elements are equal.
+pub(crate) fn fr_equal(aa: &fr_t, bb: &fr_t) -> bool {
+    let mut a = [0u64; 4];
+    let mut b = [0u64; 4];
+
+    unsafe {
+        blst_uint64_from_fr(a.as_mut_ptr(), aa);
+        blst_uint64_from_fr(b.as_mut_ptr(), bb);
+    }
+
+    a == b
 }
 
 /// Divide a field element by another.
@@ -250,7 +266,7 @@ pub(crate) fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
         blst_scalar_from_bendian(&mut tmp, b.bytes.as_ptr());
         if !blst_scalar_fr_check(&tmp) {
             return Err(Error::BadArgs(
-                "bytes_to_bls_field Invalid bytes32".to_string(),
+                "bytes_to_bls_field Invalid Bytes32".to_string(),
             ));
         }
         blst_fr_from_scalar(&mut res, &tmp);
@@ -259,7 +275,7 @@ pub(crate) fn bytes_to_bls_field(b: &Bytes32) -> Result<fr_t, Error> {
 }
 
 /// Perform BLS validation required by the types `KZGProof` and `KZGCommitment`.
-/// 
+///
 /// Note: This function deviates from the spec because it returns (via an
 /// output argument) the g1 point. This way is more efficient (faster)
 /// but the function name is a bit misleading.
@@ -299,7 +315,7 @@ pub fn bytes_to_kzg_commitment(b: &Bytes48) -> Result<g1_t, Error> {
 }
 
 /// Convert untrusted bytes into a trusted and validated KZGProof.
- pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
+pub fn bytes_to_kzg_proof(b: &Bytes48) -> Result<g1_t, Error> {
     validate_kzg_g1(b)
 }
 
@@ -310,8 +326,10 @@ pub fn bytes_to_kzg_commitment(b: &Bytes48) -> Result<g1_t, Error> {
 ///
 /// This function computes the result naively without using Pippenger's
 /// algorithm.
-pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
-    assert_eq!(p.len(), coeffs.len());
+pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
+    if p.len() != coeffs.len() {
+        return Err(Error::InternalError);
+    }
     let len = p.len();
 
     let mut tmp;
@@ -320,42 +338,45 @@ pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> g1_t {
         tmp = g1_mul(&p[i], &coeffs[i]);
         unsafe { blst_p1_add_or_double(&mut res, &res, &tmp) }
     }
-    res
+    Ok(res)
 }
 
 ///  Calculate a linear combination of G1 group elements.
-/// 
+///
 ///  Calculates `[coeffs_0]p_0 + [coeffs_1]p_1 + ... + [coeffs_n]p_n`
 ///  where `n` is `len - 1`.
-/// 
+///
 ///  NOTE: This function **MUST NOT** be called with the point at infinity in `p`.
-/// 
+///
 ///  While this function is significantly faster than
 ///  `g1_lincomb_naive()`, we refrain from using it in security-critical places
 ///  (like verification) because the blst Pippenger code has not been
 ///  audited. In those critical places, we prefer using `g1_lincomb_naive()` which
 ///  is much simpler.
-/// 
+///
 ///  For the benefit of future generations (since Blst has no documentation to
 ///  speak of), there are two ways to pass the arrays of scalars and points
 ///  into blst_p1s_mult_pippenger().
-/// 
+///
 ///  1. Pass `points` as an array of pointers to the points, and pass
 ///     `scalars` as an array of pointers to the scalars, each of length p.len().
 ///  2. Pass an array where the first element is a pointer to the contiguous
 ///     array of points and the second is null, and similarly for scalars.
-/// 
+///
 ///  We do the second of these to save memory here.
 pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error> {
     let len = p.len();
     if len < 8 {
-        return Ok(g1_lincomb_naive(p, coeffs));
+        return g1_lincomb_naive(p, coeffs);
     }
     let scratch_size: usize;
     let mut res = g1_t::default();
     unsafe {
         scratch_size = blst_p1s_mult_pippenger_scratch_sizeof(len);
     }
+    // Note: In the C code, `scratch` is a a void pointer. We use a u64 array because
+    // the ffi function `blst_p1s_mult_pippenger` implementation below accepts a pointer of form
+    // *mut u64.
     let mut scratch: Vec<_> = (0..scratch_size).map(|_| 0u64).collect();
     let mut p_affine: Vec<_> = (0..len).map(|_| blst_p1_affine::default()).collect();
     let mut scalars: Vec<_> = (0..len).map(|_| blst_scalar::default()).collect();
@@ -371,7 +392,8 @@ pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error
         }
 
         /* Call the Pippenger implementation */
-        // WARNING: potential segfault here
+        // Note: the corresponding C code is
+        // const byte *scalars_arg[2] = {(byte *)scalars, NULL};
         let scalars_arg: [_; 2] = [scalars[0].b.as_ptr(), std::ptr::null()];
         let points_arg: [_; 2] = [p_affine.as_ptr(), std::ptr::null()];
         blst_p1s_mult_pippenger(
@@ -407,6 +429,12 @@ pub(crate) fn compute_r_powers<const FIELD_ELEMENTS_PER_BLOB: usize>(
     ys_fr: &[fr_t],
     proofs_g1: &[g1_t],
 ) -> Result<Vec<fr_t>, Error> {
+    if commitments_g1.len() != zs_fr.len()
+        && commitments_g1.len() != ys_fr.len()
+        && commitments_g1.len() != proofs_g1.len()
+    {
+        return Err(Error::InternalError);
+    }
     let n = commitments_g1.len();
     let input_size = DOMAIN_STR_LENGTH
         + std::mem::size_of::<u64>()
