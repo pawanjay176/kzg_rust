@@ -517,7 +517,7 @@ fn evaluate_polynomial_in_evaluation_form<const FIELD_ELEMENTS_PER_BLOB: usize>(
          * Note that special-casing this is necessary, as the formula below
          * would divide by zero otherwise.
          */
-        if *x == s.roots_of_unity[i] {
+        if fr_equal(x, &s.roots_of_unity[i]) {
             return Ok(p.evals[i]);
         }
         unsafe {
@@ -635,7 +635,7 @@ fn compute_kzg_proof_impl<const FIELD_ELEMENTS_PER_BLOB: usize>(
     let mut inverses_in = [fr_t::default(); FIELD_ELEMENTS_PER_BLOB];
     let mut m = 0usize;
     for i in 0..FIELD_ELEMENTS_PER_BLOB {
-        if *z == s.roots_of_unity[i] {
+        if fr_equal(z, &s.roots_of_unity[i]) {
             /* We are asked to compute a KZG proof inside the domain */
             m = i + 1;
             inverses_in[i] = FR_ONE;

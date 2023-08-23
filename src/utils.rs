@@ -7,8 +7,6 @@ use BLST_ERROR::BLST_SUCCESS;
 /* Helper Functions */
 
 /// Test whether the operand is one in the finite field.
-///
-/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
 pub(crate) fn fr_is_one(p: &fr_t) -> bool {
     let mut a = [0u64; 4];
     unsafe {
@@ -19,9 +17,23 @@ pub(crate) fn fr_is_one(p: &fr_t) -> bool {
 
 /// Test whether the operand is zero in the finite field.
 ///
-/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl.
+/// NOTE: deviates from c_kzg_4844.c to use rust's `PartialEq` impl
+/// since `FR_ZERO` is defined as [0, 0, 0, 0]
 pub(crate) fn fr_is_zero(p: &fr_t) -> bool {
     *p == FR_ZERO
+}
+
+/// Test whether two field elements are equal.
+pub(crate) fn fr_equal(aa: &fr_t, bb: &fr_t) -> bool {
+    let mut a = [0u64; 4];
+    let mut b = [0u64; 4];
+
+    unsafe {
+        blst_uint64_from_fr(a.as_mut_ptr(), aa);
+        blst_uint64_from_fr(b.as_mut_ptr(), bb);
+    }
+
+    a == b
 }
 
 /// Divide a field element by another.
