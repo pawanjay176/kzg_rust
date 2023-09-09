@@ -3,6 +3,7 @@ use crate::trusted_setup::TrustedSetupGeneric;
 use crate::utils::*;
 use blst::*;
 use blst::{blst_fr as fr_t, blst_p1 as g1_t, blst_p2 as g2_t};
+use rayon::prelude::*;
 use std::fs::File;
 use std::path::Path;
 
@@ -284,12 +285,18 @@ fn blob_to_polynomial<const BYTES_PER_BLOB: usize, const FIELD_ELEMENTS_PER_BLOB
     blob: &BlobGeneric<BYTES_PER_BLOB>,
 ) -> Result<Polynomial<FIELD_ELEMENTS_PER_BLOB>, Error> {
     let mut poly = Polynomial::default();
-    for i in 0..FIELD_ELEMENTS_PER_BLOB {
-        let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
-        let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT;
-        let field_bytes = Bytes32::from_bytes(&blob.bytes[start_bytes..end_bytes])?;
-        poly.evals[i] = bytes_to_bls_field(&field_bytes)?;
-    }
+    let res: Result<_, Error> = poly
+        .evals
+        .par_iter_mut()
+        .enumerate()
+        .try_for_each(|(i, eval)| {
+            let start_bytes = i * BYTES_PER_FIELD_ELEMENT;
+            let end_bytes = start_bytes + BYTES_PER_FIELD_ELEMENT;
+            let field_bytes = Bytes32::from_bytes(&blob.bytes[start_bytes..end_bytes])?;
+            *eval = bytes_to_bls_field(&field_bytes)?;
+            Ok(())
+        });
+    res?;
     Ok(poly)
 }
 
@@ -687,41 +694,12 @@ fn verify_blob_kzg_proof_batch<
             s,
         );
     }
-    // Note: Potentially paralellizable
-    /* Convert each commitment to a g1 point */
-    let mut commitments_g1: Vec<_> = (0..n).map(|_| g1_t::default()).collect();
 
-    /* Convert each proof to a g1 point */
-    let mut proofs_g1: Vec<_> = (0..n).map(|_| g1_t::default()).collect();
-
-    let mut evaluation_challenges_fr: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
-    let mut ys_fr: Vec<_> = (0..n).map(|_| fr_t::default()).collect();
-
-    for i in 0..n {
-        /* Convert each commitment to a g1 point */
-        commitments_g1[i] = bytes_to_kzg_commitment(&commitment_bytes[i].0)?;
-        /* Convert each blob from bytes to a poly */
-        let polynomial = blob_to_polynomial::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(&blobs[i])?;
-
-        evaluation_challenges_fr[i] = compute_challenge::<BYTES_PER_BLOB, FIELD_ELEMENTS_PER_BLOB>(
-            &blobs[i],
-            &commitment_bytes[i].0,
-        )?;
-
-        ys_fr[i] =
-            evaluate_polynomial_in_evaluation_form(&polynomial, &evaluation_challenges_fr[i], s)?;
-
-        proofs_g1[i] = bytes_to_kzg_proof(&proof_bytes[i].0)?;
-    }
-
-    let res = verify_kzg_proof_batch::<FIELD_ELEMENTS_PER_BLOB>(
-        &commitments_g1,
-        &evaluation_challenges_fr,
-        &ys_fr,
-        &proofs_g1,
-        s,
-    )?;
-    Ok(res)
+    let results: Result<Vec<bool>, Error> = (blobs, commitment_bytes, proof_bytes)
+        .into_par_iter()
+        .map(|(blob, commitment, proof)| verify_blob_kzg_proof(blob, commitment, proof, s))
+        .collect();
+    Ok(results?.into_iter().all(|r| r))
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -773,7 +751,9 @@ fn expand_root_of_unity(root: &fr_t, width: u64) -> Result<Vec<fr_t>, Error> {
 
     while !fr_is_one(&res[i - 1]) {
         if i > width as usize {
-            return Err(Error::BadArgs("expand_root_of_unity: i > width".to_string()));
+            return Err(Error::BadArgs(
+                "expand_root_of_unity: i > width".to_string(),
+            ));
         }
         unsafe {
             blst_fr_mul(&mut tmp, &res[i - 1], root);

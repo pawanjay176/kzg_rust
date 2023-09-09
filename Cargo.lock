@@ -327,6 +327,7 @@ dependencies = [
  "glob",
  "hex",
  "rand",
+ "rayon",
  "serde",
  "serde_json",
  "serde_yaml",

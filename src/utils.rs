@@ -369,42 +369,19 @@ pub(crate) fn g1_lincomb_fast(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Error
     if len < 8 {
         return g1_lincomb_naive(p, coeffs);
     }
-    let scratch_size: usize;
-    let mut res = g1_t::default();
-    unsafe {
-        scratch_size = blst_p1s_mult_pippenger_scratch_sizeof(len);
-    }
-    // Note: In the C code, `scratch` is a a void pointer. We use a u64 array because
-    // the ffi function `blst_p1s_mult_pippenger` implementation below accepts a pointer of form
-    // *mut u64.
-    let mut scratch: Vec<_> = (0..scratch_size).map(|_| 0u64).collect();
-    let mut p_affine: Vec<_> = (0..len).map(|_| blst_p1_affine::default()).collect();
-    let mut scalars: Vec<_> = (0..len).map(|_| blst_scalar::default()).collect();
+    let points = unsafe { core::slice::from_raw_parts(p.as_ptr() as *const blst_p1, len) };
+    let points = p1_affines::from(points);
 
-    /* Transform the points to affine representation */
-    unsafe {
-        let p_arg: [_; 2] = [p.as_ptr(), std::ptr::null()];
-        blst_p1s_to_affine(p_affine.as_mut_ptr(), p_arg.as_ptr(), len);
-
-        /* Transform the field elements to 256-bit scalars */
-        for i in 0..len {
-            blst_scalar_from_fr(&mut scalars[i], &coeffs[i])
+    let mut scalar_bytes: Vec<u8> = Vec::with_capacity(len * 32);
+    for scalar in coeffs.iter() {
+        let mut bytes = blst_scalar::default();
+        unsafe {
+            blst_scalar_from_fr(&mut bytes, scalar);
         }
-
-        /* Call the Pippenger implementation */
-        // Note: the corresponding C code is
-        // const byte *scalars_arg[2] = {(byte *)scalars, NULL};
-        let scalars_arg: [_; 2] = [scalars[0].b.as_ptr(), std::ptr::null()];
-        let points_arg: [_; 2] = [p_affine.as_ptr(), std::ptr::null()];
-        blst_p1s_mult_pippenger(
-            &mut res,
-            points_arg.as_ptr(),
-            len,
-            scalars_arg.as_ptr(),
-            255,
-            scratch.as_mut_ptr(),
-        );
+        scalar_bytes.extend_from_slice(&bytes.b);
     }
+
+    let res = points.mult(scalar_bytes.as_slice(), 255);
 
     Ok(res)
 }
