@@ -10,13 +10,13 @@ pub const BYTES_PER_COMMITMENT: usize = 48;
 /// The number of bytes in a KZG proof.
 pub const BYTES_PER_PROOF: usize = 48;
 
-pub const FIELD_ELEMENTS_PER_BLOB_MAINNET: usize = 4096;
-pub const FIELD_ELEMENTS_PER_BLOB_MINIMAL: usize = 4;
+pub const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
+
+/// Number of bytes in a blob.
+pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
 
 /// Input size to the Fiat-Shamir challenge computation.
-pub const fn challenge_input_size<const BYTES_PER_BLOB: usize>() -> usize {
-    DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT
-}
+pub const CHALLENGE_INPUT_SIZE: usize = DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT;
 
 /// Domain seperator for the Fiat-Shamir protocol.
 pub const FIAT_SHAMIR_PROTOCOL_DOMAIN: &str = "FSBLOBVERIFY_V1_";
