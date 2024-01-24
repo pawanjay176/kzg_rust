@@ -87,6 +87,32 @@ pub(crate) fn fr_from_uint64(n: u64) -> fr_t {
     }
 }
 
+pub(crate) fn fr_add(a: &fr_t, b: &fr_t) -> fr_t {
+    let mut res = fr_t::default();
+    unsafe {
+        blst_fr_add(&mut res, a, b);
+    }
+    res
+}
+
+pub(crate) fn fr_sub(a: &fr_t, b: &fr_t) -> fr_t {
+    let mut res = fr_t::default();
+    unsafe {
+        blst_fr_sub(&mut res, a, b);
+    }
+    res
+}
+
+/// Returns the inverse of the given integer in the BLST field
+pub(crate) fn fr_inverse(a: u64) -> fr_t {
+    let x = fr_from_uint64(a);
+    let mut res = fr_t::default();
+    unsafe {
+        blst_fr_eucl_inverse(&mut res, &x);
+    }
+    res
+}
+
 /// Montgomery batch inversion in finite field.
 ///
 /// This function only supports non zero lengths of `a`.
@@ -339,6 +365,88 @@ pub(crate) fn g1_lincomb_naive(p: &[g1_t], coeffs: &[fr_t]) -> Result<g1_t, Erro
         unsafe { blst_p1_add_or_double(&mut res, &res, &tmp) }
     }
     Ok(res)
+}
+
+/// Calculate a linear combination of G2 group elements.
+///
+/// Calculates `[coeffs_0]p_0 + [coeffs_1]p_1 + ... + [coeffs_n]p_n`
+/// where `n` is `len - 1`.
+///
+/// This function computes the result naively without using Pippenger's
+/// algorithm.
+/// TODO(pawan): is there a faster version of this?
+pub(crate) fn g2_lincomb(points: &[g2_t], scalars: &[fr_t]) -> Result<g2_t, Error> {
+    if points.len() != scalars.len() {
+        return Err(Error::InternalError);
+    }
+    let len = points.len();
+    let mut tmp;
+    let mut res = G2_IDENTITY;
+    for i in 0..len {
+        tmp = g2_mul(&points[i], &scalars[i]);
+        unsafe { blst_p2_add_or_double(&mut res, &res, &tmp) }
+    }
+    Ok(res)
+}
+
+/// I'm assuming this converts from the coefficient form of a
+/// polynomial to a evaluation form given the roots of unity.
+///
+/// This is a recursive algorithm that should work in O(nlogn)
+pub(crate) fn fft_field_helper(vals: Vec<fr_t>, roots_of_unity: Vec<fr_t>) -> Vec<fr_t> {
+    // Base case
+    if vals.len() == 1 {
+        return vals;
+    }
+
+    let even_coefficients = fft_field_helper(
+        vals.iter().step_by(2).cloned().collect(),
+        roots_of_unity.iter().step_by(2).cloned().collect(),
+    );
+
+    let odd_coefficients = fft_field_helper(
+        vals.iter().skip(1).step_by(2).cloned().collect(),
+        roots_of_unity.iter().skip(1).step_by(2).cloned().collect(),
+    );
+
+    let mut res = vec![fr_t::default(); vals.len()];
+    for (i, (x, y)) in even_coefficients
+        .iter()
+        .zip(odd_coefficients.iter())
+        .enumerate()
+    {
+        let mut y_times_root = fr_t::default();
+        unsafe {
+            blst_fr_mul(&mut y_times_root, y, &roots_of_unity[i]);
+        }
+        res[i] = fr_add(x, &y_times_root);
+
+        res[i + even_coefficients.len()] = fr_sub(x, &y_times_root);
+    }
+    res
+}
+
+/// Inverse is to get the inverse fft (i.e. evaluation form to coefficient form)
+pub(crate) fn fft_field(vals: Vec<fr_t>, roots_of_unity: Vec<fr_t>, inverse: bool) -> Vec<fr_t> {
+    if inverse {
+        let len_fr = fr_from_uint64(vals.len() as u64);
+        let inverse_roots_of_unity = [
+            &roots_of_unity[0..1],
+            roots_of_unity[1..]
+                .iter()
+                .rev()
+                .cloned()
+                .collect::<Vec<_>>()
+                .as_slice(),
+        ]
+        .concat();
+        fft_field_helper(vals, inverse_roots_of_unity)
+            .into_iter()
+            .map(|val| fr_div(val, len_fr))
+            .collect()
+    } else {
+        fft_field_helper(vals, roots_of_unity)
+    }
 }
 
 ///  Calculate a linear combination of G1 group elements.
