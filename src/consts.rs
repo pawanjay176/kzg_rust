@@ -12,17 +12,26 @@ pub const BYTES_PER_PROOF: usize = 48;
 
 pub const FIELD_ELEMENTS_PER_BLOB: usize = 4096;
 
+pub const FIELD_ELEMENTS_PER_CELL: usize = 64;
+
+pub const BYTES_PER_CELL: usize = FIELD_ELEMENTS_PER_CELL * BYTES_PER_FIELD_ELEMENT;
+
+pub const CELLS_PER_BLOB: usize = 2 * FIELD_ELEMENTS_PER_BLOB / FIELD_ELEMENTS_PER_CELL;
+
 /// Number of bytes in a blob.
 pub const BYTES_PER_BLOB: usize = FIELD_ELEMENTS_PER_BLOB * BYTES_PER_FIELD_ELEMENT;
 
 /// Input size to the Fiat-Shamir challenge computation.
-pub const CHALLENGE_INPUT_SIZE: usize = DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT;
+pub const CHALLENGE_INPUT_SIZE: usize =
+    DOMAIN_STR_LENGTH + 16 + BYTES_PER_BLOB + BYTES_PER_COMMITMENT;
 
 /// Domain seperator for the Fiat-Shamir protocol.
 pub const FIAT_SHAMIR_PROTOCOL_DOMAIN: &str = "FSBLOBVERIFY_V1_";
 
 /// Domain sepearator for a random challenge.
 pub const RANDOM_CHALLENGE_KZG_BATCH_DOMAIN: &str = "RCKZGBATCH___V1_";
+
+pub const RANDOM_CHALLENGE_KZG_CELL_BATCH_DOMAIN: &str = "RCKZGCBATCH__V1_";
 
 /// Length of above domain strings.
 pub const DOMAIN_STR_LENGTH: usize = 16;
@@ -37,10 +46,25 @@ pub const BYTES_PER_G2: usize = 96;
 pub const TRUSTED_SETUP_NUM_G2_POINTS: usize = 65;
 
 /// Deserialized form of the G1 identity/infinity point
+/// Deserialized form of the G1 identity/infinity point
 pub const G1_IDENTITY: g1_t = g1_t {
     x: blst::blst_fp { l: [0; 6] },
     y: blst::blst_fp { l: [0; 6] },
     z: blst::blst_fp { l: [0; 6] },
+};
+
+/// Deserialized form of the G2 identity/infinity point
+/// TODO(pawan): just made this up, might be wrong so check
+pub const G2_IDENTITY: g2_t = g2_t {
+    x: blst_fp2 {
+        fp: [blst_fp { l: [0; 6] }; 2],
+    },
+    y: blst_fp2 {
+        fp: [blst_fp { l: [0; 6] }; 2],
+    },
+    z: blst_fp2 {
+        fp: [blst_fp { l: [0; 6] }; 2],
+    },
 };
 
 /// The G1 generator.
