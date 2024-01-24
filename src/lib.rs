@@ -5,15 +5,15 @@ mod trusted_setup;
 mod utils;
 
 pub use consts::{
-    BYTES_PER_COMMITMENT, BYTES_PER_FIELD_ELEMENT, BYTES_PER_G1, BYTES_PER_G2, BYTES_PER_PROOF,
+    BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_FIELD_ELEMENT, BYTES_PER_G1, BYTES_PER_G2,
+    BYTES_PER_PROOF, FIELD_ELEMENTS_PER_BLOB,
 };
-pub use kzg::{kzg_mainnet, kzg_minimal, Bytes32, Bytes48, Error, KzgCommitment, KzgProof};
-
-pub(crate) use kzg::BlobGeneric;
+pub use kzg::{Blob, Bytes32, Bytes48, Error, Kzg, KzgCommitment, KzgProof};
+pub use trusted_setup::TrustedSetup;
 
 #[cfg(test)]
 mod tests {
-    use super::kzg_mainnet::*;
+    use super::kzg::*;
     use super::*;
     use std::fs;
     use std::path::PathBuf;

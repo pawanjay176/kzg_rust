@@ -1,6 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use kzg_rust::*;
-use kzg_mainnet::*;
 use rand::{rngs::ThreadRng, Rng};
 
 const TRUSTED_SETUP: &str = "trusted_setup.txt";

@@ -423,7 +423,7 @@ pub(crate) fn compute_powers(x: &fr_t, n: usize) -> Vec<fr_t> {
 }
 
 /// Compute random linear combination challenge scalars for batch verification.
-pub(crate) fn compute_r_powers<const FIELD_ELEMENTS_PER_BLOB: usize>(
+pub(crate) fn compute_r_powers(
     commitments_g1: &[g1_t],
     zs_fr: &[fr_t],
     ys_fr: &[fr_t],
